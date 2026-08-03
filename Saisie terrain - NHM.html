@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saisie terrain · Avancement des locaux</title>
+<script>
+/* ------------------------------------------------------------------
+   LANCEUR — Cartographie des locaux par niveaux
+   Remplacez la ligne SOURCE ci-dessous par l'adresse de VOTRE fichier
+   index.html hébergé en ligne, puis distribuez ce fichier.
+   Exemple GitHub : https://raw.githubusercontent.com/moncompte/cartographie/main/index.html
+------------------------------------------------------------------ */
+var SOURCE = "https://raw.githubusercontent.com/OEK4/cartographie/main/saisie.html";
+</script>
+<style>
+html,body{margin:0;height:100%;background:#2C3A33;font-family:'Archivo Narrow',Segoe UI,Arial,sans-serif;color:#FFFFFF;}
+#splash{height:100%;display:flex;align-items:center;justify-content:center;}
+.card{width:360px;background:#FFFFFF;color:#1F2620;border-radius:14px;padding:26px;box-shadow:0 12px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:12px;}
+.logos{display:flex;align-items:center;justify-content:space-between;gap:14px;padding-bottom:12px;border-bottom:1px solid #E9E6E0;}
+.logos img{display:block;object-fit:contain;}
+.logos .lp{height:93px;max-width:40%;}
+.logos .le{height:159px;max-width:55%;}
+.t{font-size:19px;font-weight:700;}
+.s{font-size:13.5px;color:#6B675F;}
+.bar{height:6px;border-radius:3px;background:#E9E6E0;overflow:hidden;}
+.bar i{display:block;height:100%;width:35%;background:#2C3A33;animation:go 1.1s ease-in-out infinite;}
+@keyframes go{0%{margin-left:-35%}100%{margin-left:100%}}
+.err{font-size:13px;font-weight:600;color:#B23A34;background:#FBE3E1;border:1px solid #F0C4C0;border-radius:8px;padding:9px 11px;}
+button{background:#2C3A33;color:#fff;border:0;border-radius:9px;padding:10px 16px;font:600 14px 'Archivo Narrow',Arial;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="splash">
+  <div class="card">
+    <div class="logos">
+      <img class="lp" src="https://drive.google.com/thumbnail?id=1p4Xu-kw1YRoCoIVvglcxlK49Qo91t7_E&amp;sz=w400" alt="Logo du projet" onerror="this.style.display='none'">
+      <img class="le" src="https://drive.google.com/thumbnail?id=1J8QnlcWb8gaMKwtHaLv45TkidZjcE5da&amp;sz=w400" alt="Logo de l&rsquo;entreprise" onerror="this.style.display='none'">
+    </div>
+    <div class="t">CARTOGRAPHIE DES LOCAUX</div>
+    <div class="s" id="msg">Recherche de la dernière version en ligne…</div>
+    <div class="bar"><i></i></div>
+    <div id="zone"></div>
+  </div>
+</div>
+<script>
+(function () {
+  var KEY = 'cartoLauncher.cache.v1', KEYD = 'cartoLauncher.date.v1';
+  var msg = document.getElementById('msg'), zone = document.getElementById('zone');
+  var q = (location.search.match(/[?&]src=([^&]+)/) || [])[1];
+  if (q) SOURCE = decodeURIComponent(q);
+
+  function show(html, offline, when) {
+    try {
+      document.open();
+      document.write(html);
+      document.close();
+      if (offline) {
+        setTimeout(function () {
+          var b = document.createElement('div');
+          b.textContent = 'Version hors ligne du ' + when + ' — reconnectez-vous pour la dernière mise à jour';
+          b.setAttribute('style', 'position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#FFF6E0;color:#8C6A1F;font:600 12px Arial;padding:6px 12px;text-align:center;border-top:1px solid #E8C97A');
+          document.body.appendChild(b);
+        }, 900);
+      }
+    } catch (e) { fail('Impossible d’afficher l’application.'); }
+  }
+
+  function cached() {
+    try { return { html: localStorage.getItem(KEY), date: localStorage.getItem(KEYD) || '' }; } catch (e) { return { html: null, date: '' }; }
+  }
+
+  function fail(t) {
+    msg.textContent = '';
+    var c = cached();
+    zone.innerHTML = '<div class="err">' + t + '</div>';
+    if (c.html) {
+      var b = document.createElement('button');
+      b.textContent = 'Ouvrir la dernière version enregistrée (' + c.date + ')';
+      b.onclick = function () { show(c.html, true, c.date); };
+      zone.appendChild(b);
+    }
+    var r = document.createElement('button');
+    r.textContent = 'Réessayer';
+    r.setAttribute('style', 'background:#FFFFFF;color:#2C3A33;border:1.5px solid #2C3A33;margin-top:8px');
+    r.onclick = function () { location.reload(); };
+    zone.appendChild(r);
+  }
+
+  function tryUrls(list, i) {
+    if (i >= list.length) {
+      var c = cached();
+      if (c.html) { show(c.html, true, c.date); return; }
+      fail('Connexion impossible et aucune version enregistrée sur ce poste.');
+      return;
+    }
+    var u = list[i] + (list[i].indexOf('?') < 0 ? '?' : '&') + 't=' + Date.now();
+    var ctl = new AbortController();
+    var to = setTimeout(function () { ctl.abort(); }, 12000);
+    fetch(u, { cache: 'no-store', signal: ctl.signal })
+      .then(function (r) { clearTimeout(to); if (!r.ok) throw 0; return r.text(); })
+      .then(function (html) {
+        if (!html || html.length < 2000 || html.indexOf('<') < 0) throw 0;
+        var when = new Date().toLocaleDateString('fr-FR');
+        try { localStorage.setItem(KEY, html); localStorage.setItem(KEYD, when); } catch (e) {}
+        msg.textContent = 'Ouverture…';
+        show(html, false, when);
+      })
+      .catch(function () { clearTimeout(to); tryUrls(list, i + 1); });
+  }
+
+  if (!SOURCE || SOURCE.indexOf('VOTRE-COMPTE') >= 0) {
+    fail('Adresse de mise à jour non configurée dans ce fichier (variable SOURCE).');
+    return;
+  }
+  tryUrls([SOURCE, 'https://api.allorigins.win/raw?url=' + encodeURIComponent(SOURCE)], 0);
+})();
+</script>
+</body>
+</html>
