@@ -23,7 +23,7 @@ html,body{margin:0;height:100%;background:#0E1512;color:#F2F1ED;font-family:'Arc
 #appFond{position:fixed;inset:0;pointer-events:none;}
 #appFond img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.16;}
 #appFond .g{position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 45%,rgba(20,27,23,.55) 0%,rgba(20,27,23,.94) 68%);}
-#carte{position:relative;width:min(880px,100%);background:#F7F6F3;border-radius:18px;box-shadow:0 34px 90px rgba(0,0,0,.55);overflow:hidden;}
+#carte{position:relative;width:min(880px,100%);transform:scale(.94);opacity:0;animation:entree .75s cubic-bezier(.16,.9,.3,1) .05s forwards;background:#F7F6F3;border-radius:18px;box-shadow:0 34px 90px rgba(0,0,0,.55);overflow:hidden;}
 #carte .band{height:6px;background:linear-gradient(90deg,#E8A13C 0 50%,#5B8DEF 50% 100%);}
 #carte .in{padding:34px 40px 26px;}
 .logos{display:flex;align-items:center;gap:16px;}
@@ -50,9 +50,11 @@ button.app .fl{margin-top:8px;font-size:19px;color:var(--c);font-weight:700;}
 #refs .liste div.v{opacity:1;transform:none;}
 #pied{padding:11px 40px 16px;font-size:11.5px;color:#A8A49C;background:#EFEDE8;}
 @media(max-width:640px){.choix{grid-template-columns:1fr}#carte .in{padding:26px 24px 20px}#refs,#pied{padding-left:24px;padding-right:24px}}
+@keyframes entree{to{transform:none;opacity:1}}
+@keyframes ouverture{from{transform:scale(.86);opacity:0}to{transform:none;opacity:1}}
 #splash{position:fixed;inset:0;z-index:100;background:#0B110E;display:flex;align-items:center;justify-content:center;transition:opacity .7s ease;}
 #splash.off{opacity:0;pointer-events:none;}
-#sp{width:min(1060px,95vw);height:min(620px,88vh);background:#F7F6F3;border-radius:8px;overflow:hidden;display:flex;box-shadow:0 34px 90px rgba(0,0,0,.62);}
+#sp{width:min(1060px,95vw);height:min(620px,88vh);animation:ouverture .8s cubic-bezier(.16,.9,.3,1) both;background:#F7F6F3;border-radius:8px;overflow:hidden;display:flex;box-shadow:0 34px 90px rgba(0,0,0,.62);}
 #spG{flex:1;padding:30px 34px 22px;display:flex;flex-direction:column;min-width:0;}
 #spG .hd{display:flex;align-items:center;gap:15px;}
 #spG .hd img{height:56px;width:auto;display:block;}
@@ -144,6 +146,26 @@ button.app .fl{margin-top:8px;font-size:19px;color:var(--c);font-weight:700;}
 </div>
 <script>
 document.getElementById('v').textContent = VERSION;
+var APPWIN = (function () {
+  var seul = window.matchMedia && (window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: window-controls-overlay)').matches);
+  function place(l, ht, anim) {
+    if (!seul) return;
+    try {
+      var L = Math.min(l, screen.availWidth - 40), H = Math.min(ht, screen.availHeight - 60);
+      var x = Math.round((screen.availWidth - L) / 2), y = Math.round((screen.availHeight - H) / 2);
+      if (!anim) { window.resizeTo(L, H); window.moveTo(x, y); return; }
+      var l0 = window.outerWidth, h0 = window.outerHeight, x0 = window.screenX, y0 = window.screenY, t0 = Date.now(), D = 620;
+      var t = setInterval(function () {
+        var p = Math.min(1, (Date.now() - t0) / D), e = 1 - Math.pow(1 - p, 3);
+        window.resizeTo(Math.round(l0 + (L - l0) * e), Math.round(h0 + (H - h0) * e));
+        window.moveTo(Math.round(x0 + (x - x0) * e), Math.round(y0 + (y - y0) * e));
+        if (p >= 1) clearInterval(t);
+      }, 16);
+    } catch (e) {}
+  }
+  return { petit: function () { place(1090, 660, false); }, grand: function () { place(1500, 950, true); } };
+})();
+APPWIN.petit();
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('sw.js').then(function (reg) {
     reg.addEventListener('updatefound', function () {
@@ -175,6 +197,7 @@ function finSplash() {
   var sp = document.getElementById('splash');
   if (!sp || sp.className === 'off') return;
   sp.className = 'off';
+  try { APPWIN.grand(); } catch (e) {}
   setTimeout(function () { sp.style.display = 'none'; }, 750);
 }
 (function () {
