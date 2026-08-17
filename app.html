@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cartographie des locaux · HMIMV · Bymaro</title>
+<title>CETVIEWER · HMIMV · Bymaro</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#2C3A33">
 <link rel="icon" href="icone-192.png">
@@ -11,11 +11,11 @@
 <script>
 /* Adresses des applications en ligne */
 var APPS = {
-  saisie: { nom: "Saisie terrain", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Saisie%20terrain%20-%20NHM.html" },
-  carto:  { nom: "Cartographie",   src: "https://raw.githubusercontent.com/OEK4/cartographie/main/index.html" },
-  resultats: { nom: "Résultats", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Resultats%20-%20NHM.html" }
+  saisie: { nom: "Saisie terrain", sig: "saisie terrain", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Saisie%20terrain%20-%20NHM.html" },
+  carto:  { nom: "Cartographie", sig: "cartographie", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/index.html" },
+  resultats: { nom: "Résultats", sig: "résultats", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Resultats%20-%20NHM.html" }
 };
-var VERSION = "2026.08";
+var VERSION = "2026.08.2";
 </script>
 <style>
 *{box-sizing:border-box;}
@@ -89,7 +89,7 @@ button.app .fl{margin-top:8px;font-size:19px;color:var(--c);font-weight:700;}
     <div id="spG">
       <div class="hd">
         <img src="https://lh3.googleusercontent.com/d/1p4Xu-kw1YRoCoIVvglcxlK49Qo91t7_E=w400" alt="" onerror="this.style.display='none'">
-        <div class="nm">Cartographie des locaux<span>HMIMV &middot; RABAT</span></div>
+        <div class="nm">CETVIEWER<span>HMIMV &middot; RABAT</span></div>
       </div>
       <div class="cr">&copy; 2026 <b>Bymaro</b>, Bouygues B&acirc;timent International. Tous droits r&eacute;serv&eacute;s.<br>Visuels : chantiers et r&eacute;alisations Bymaro au Maroc.<br>Version <b id="v2"></b> &middot; SSP &middot; TSG &middot; SMT &middot; CDI</div>
       <div class="init" id="init">Initialisation&hellip;</div>
@@ -121,8 +121,8 @@ button.app .fl{margin-top:8px;font-size:19px;color:var(--c);font-weight:700;}
         <div class="sep"></div>
         <img src="https://lh3.googleusercontent.com/d/1J8QnlcWb8gaMKwtHaLv45TkidZjcE5da=w400" alt="" style="height:42px" onerror="this.style.display='none'">
       </div>
-      <h1>Locaux par niveaux &middot; HMIMV</h1>
-      <div class="sous">Quantit&eacute;s &middot; Planification &middot; Effectifs &middot; Avancement &middot; SSP &middot; TSG &middot; SMT &middot; CDI</div>
+      <h1>CETVIEWER &middot; HMIMV</h1>
+      <div class="sous">Du pointage terrain &agrave; la d&eacute;cision &middot; SSP &middot; TSG &middot; SMT &middot; CDI</div>
       <div class="ver">VERSION <span id="v"></span></div>
       <div class="choix">
         <button class="app" style="--c:#E8A13C" onclick="ouvrir('saisie')">
@@ -264,11 +264,20 @@ var REFS = [
 })();
 var msg = document.getElementById('msg'), bar = document.getElementById('bar');
 function afficher(html) { document.open(); document.write(html); document.close(); }
+/* Vérifie que le fichier reçu est bien la bonne application (titre attendu),
+   sinon on passe à la source suivante — évite qu'un cache ou le service
+   worker serve la cartographie à la place de la saisie. */
+function bonContenu(k, t) {
+  if (!t || t.length < 500) return false;
+  var m = t.match(/<title>([^<]*)<\/title>/i);
+  return !!(m && m[1].toLowerCase().indexOf(APPS[k].sig) >= 0);
+}
 function ouvrir(k) {
   var app = APPS[k];
   msg.textContent = 'Ouverture de « ' + app.nom + ' »…';
   bar.className = 'bar on';
-  var cle = 'lanceurCache.' + k;
+  var cle = 'lanceurCache2.' + k;
+  try { localStorage.removeItem('lanceurCache.' + k); } catch (e) {}
   var urls = [app.src, 'https://api.allorigins.win/raw?url=' + encodeURIComponent(app.src)];
   var i = 0;
   (function suivant() {
@@ -276,7 +285,7 @@ function ouvrir(k) {
       var c = null;
       try { c = localStorage.getItem(cle); } catch (e) {}
       bar.className = 'bar';
-      if (c) { msg.textContent = 'Version hors ligne utilisée.'; setTimeout(function () { afficher(c); }, 400); }
+      if (c && bonContenu(k, c)) { msg.textContent = 'Version hors ligne utilisée.'; setTimeout(function () { afficher(c); }, 400); }
       else msg.textContent = 'Connexion indisponible et aucune version enregistrée sur ce poste.';
       return;
     }
@@ -284,7 +293,7 @@ function ouvrir(k) {
     fetch(u + (u.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now(), { cache: 'no-store' })
       .then(function (r) { if (!r.ok) throw 0; return r.text(); })
       .then(function (t) {
-        if (!t || t.length < 500) throw 0;
+        if (!bonContenu(k, t)) throw 0;
         try { localStorage.setItem(cle, t); } catch (e) {}
         bar.className = 'bar';
         afficher(t);
