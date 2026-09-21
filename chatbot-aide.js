@@ -3,7 +3,7 @@
    Moteur : window.claude.complete si présent, sinon API Anthropic avec la clé saisie (⚙, stockée sur ce poste). */
 (function () {
   if (customElements.get('nhm-chatbot')) return;
-  var DEFAUT_CLE = atob('QVEuQWI4Uk42S0RoRW1hVDBHM3ZjRmg1QTNFZHkwbUNLbDlXcUlNREZkOTNnMlhvMGVELVE='); // clé Gemini — remplacer ici puis republier les 3 pages
+  var DEFAUT_CLE = atob('QVEuQWI4Uk42S1NSSm03RjFSZ0htRk12ZndTN0p6dFNuTHNvdlZBU2lMRW02RDNyVVZsSUE='); // clé Gemini (AI Studio, projet 1064675326935) — remplacer ici puis republier les 3 pages
   var MODELE = 'claude-3-5-haiku-latest';
   var SPN = 11;
 
@@ -251,6 +251,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ system_instruction: { parts: [{ text: sys }] }, contents: conv2, generationConfig: { maxOutputTokens: 600 } })
         });
+        if (rg.status === 503) { await new Promise(function (ok) { setTimeout(ok, 1500); }); rg = await fetch(rg.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ system_instruction: { parts: [{ text: sys }] }, contents: conv2, generationConfig: { maxOutputTokens: 600 } }) }); }
         var og = await rg.json();
         if (og && og.error) throw new Error(og.error.message || 'erreur API Gemini');
         var cand = og && og.candidates && og.candidates[0];
