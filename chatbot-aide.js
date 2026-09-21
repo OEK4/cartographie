@@ -1,10 +1,12 @@
 /* Assistant d'aide NHM — bulle flottante, design capsule Bymaro (orange / pilule blanche / noir).
    Web component autonome : <nhm-chatbot app="Saisie terrain"></nhm-chatbot>
-   Moteur : window.claude.complete si présent, sinon API Anthropic avec la clé saisie (⚙, stockée sur ce poste). */
+   Moteur : window.claude.complete si présent, sinon API Gemini avec la clé DEFAUT_CLE (ou Anthropic si une clé sk-ant… est saisie via ⚙). */
 (function () {
   if (customElements.get('nhm-chatbot')) return;
-  var DEFAUT_CLE = atob('QVEuQWI4Uk42SmVKaTQ0b3NVellIX2xiS0hzeW90SlhWTEl3a0lVeVBCcnpMZVE1blAwV0E=');
+  var DEFAUT_CLE = atob('QVEuQWI4Uk42S0RoRW1hVDBHM3ZjRmg1QTNFZHkwbUNLbDlXcUlNREZkOTNnMlhvMGVELVE='); // clé Gemini (AI Studio), projet 603354984064
   var MODELE = 'claude-3-5-haiku-latest';
+  var MODELES_GEMINI = ['gemini-3.6-flash', 'gemini-3.8-flash', 'gemini-3.7-flash']; // repli si un modèle est retiré
+  var gemIdx = 0;
   var SPN = 11;
 
   var GUIDE = [
@@ -246,12 +248,18 @@
       if (!cle) throw new Error('CLE');
       if (cle.indexOf('sk-ant') !== 0) {
         var conv2 = this.hist.map(function (m) { return { role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }; });
-        var rg = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=' + encodeURIComponent(cle), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ system_instruction: { parts: [{ text: sys }] }, contents: conv2, generationConfig: { maxOutputTokens: 600 } })
-        });
-        var og = await rg.json();
+        var og = null;
+        for (var gi = gemIdx; gi < MODELES_GEMINI.length; gi++) {
+          var rg = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + MODELES_GEMINI[gi] + ':generateContent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cle },
+            body: JSON.stringify({ system_instruction: { parts: [{ text: sys }] }, contents: conv2, generationConfig: { maxOutputTokens: 600 } })
+          });
+          og = await rg.json();
+          if (og && og.error && rg.status === 404 && gi + 1 < MODELES_GEMINI.length) continue; // modèle retiré : suivant
+          gemIdx = gi;
+          break;
+        }
         if (og && og.error) throw new Error(og.error.message || 'erreur API Gemini');
         var cand = og && og.candidates && og.candidates[0];
         return cand && cand.content && cand.content.parts ? cand.content.parts.map(function (p) { return p.text || ''; }).join('') : '';
