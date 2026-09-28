@@ -1,4 +1,4 @@
-const CACHE = 'hmimv-v2';
+const CACHE = 'hmimv-v3';
 const BASE = [
   './',
   './index.html',
@@ -21,7 +21,7 @@ self.addEventListener('fetch', e => {
   const u = new URL(r.url);
   if (u.hostname.indexOf('script.google.com') >= 0 || u.hostname.indexOf('raw.githubusercontent.com') >= 0) return;
   e.respondWith(
-    fetch(r).then(rep => {
+    fetch(r.mode === 'navigate' || /\.html$|\/$/.test(u.pathname) ? new Request(r, { cache: 'no-cache' }) : r).then(rep => {
       if (rep && rep.ok && u.origin === location.origin) {
         const cp = rep.clone();
         caches.open(CACHE).then(c => c.put(r, cp));
