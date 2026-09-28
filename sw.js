@@ -1,4 +1,4 @@
-const CACHE = 'hmimv-v3';
+const CACHE = 'hmimv-v4';
 const BASE = [
   './',
   './index.html',
