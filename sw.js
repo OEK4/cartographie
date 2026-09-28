@@ -1,8 +1,9 @@
-const CACHE = 'hmimv-v1';
+const CACHE = 'hmimv-v2';
 const BASE = [
   './',
   './index.html',
   './Saisie terrain - NHM.html',
+  './Vue 3D.html',
   './manifest.webmanifest',
   './icone-192.png',
   './icone-512.png'
