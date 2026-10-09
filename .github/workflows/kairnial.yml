@@ -1,0 +1,55 @@
+name: Kairnial → kairnial.json
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kairnial
+  cancel-in-progress: true
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Installer le navigateur
+        run: |
+          npm init -y >/dev/null
+          npm install playwright@1.47.2 xlsx@0.18.5 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+
+      - name: Exporter depuis Kairnial
+        env:
+          KAIRNIAL_URL: ${{ secrets.KAIRNIAL_URL }}
+          KAIRNIAL_LOGIN: ${{ secrets.KAIRNIAL_LOGIN }}
+          KAIRNIAL_PASSWORD: ${{ secrets.KAIRNIAL_PASSWORD }}
+          KAIRNIAL_PROJET: ${{ secrets.KAIRNIAL_PROJET }}
+        run: node robot-kairnial/export.js
+
+      - name: Publier kairnial.json
+        run: |
+          git config user.name "robot-kairnial"
+          git config user.email "robot@users.noreply.github.com"
+          git add kairnial.json
+          git diff --cached --quiet && echo "Aucun changement" && exit 0
+          git commit -m "Kairnial : états des documents $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
+
+      - name: Garder une trace en cas d'échec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: captures-echec
+          path: robot-kairnial/captures/
+          retention-days: 3
