@@ -35,6 +35,9 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ acceptDownloads: true, locale: 'fr-FR', viewport: { width: 1600, height: 1000 } });
   let page = await ctx.newPage();
+  /* Écoute des réponses du serveur : la liste des documents arrive en JSON — on garde celles qui contiennent des codes HMIMV */
+  const api = []; let nApi = 0;
+  ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (!/json/i.test(ct)) return; const t = await rep.text(); if (!/HMIMV-/.test(t)) return; const u = rep.url(); const req = rep.request(); const post = (req.postData() || '').slice(0, 300); api.push({ url: u.replace(/\?.*/, '').slice(0, 160), method: req.method(), post, taille: t.length, nb: (t.match(/HMIMV-/g) || []).length }); if (nApi < 3) { nApi++; fs.writeFileSync(path.join(CAP, 'api-' + nApi + '.json'), t.slice(0, 400000)); } } catch (e) {} });
   ctx.on('page', async p => { try { await p.waitForLoadState('domcontentloaded'); page = p; note('Nouvel onglet : ' + p.url().slice(0, 60)); } catch (e) {} });
   const ou = () => { try { const u = new URL(page.url()); return u.host + u.pathname + u.hash.slice(0, 40); } catch (e) { return '?'; } };
   const texte = async () => { let s = ''; for (const fr of page.frames()) s += ' ' + (await fr.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '')); return s.replace(/\s+/g, ' ').slice(0, 400); };
@@ -117,8 +120,21 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     note('Liste des documents : ' + ou() + ' | ' + await texte());
     await diag('liste');
     await page.screenshot({ path: path.join(CAP, '06-documents.png') });
+    note('API captées : ' + JSON.stringify(api));
+    /* Pagination au maximum (liste déroulante "30" en bas) */
+    try {
+      const sel = await bouton(page, 'select');
+      if (sel) {
+        const opts = await sel.evaluate(s => Array.from(s.options).map(o => o.value + '=' + o.text));
+        note('Options de pagination : ' + opts.join(' '));
+        const best = await sel.evaluate(s => { let b = s.options[0]; for (const o of s.options) if (parseInt(o.text) > parseInt(b.text)) b = o; return b.value; });
+        await sel.selectOption(best); await page.waitForTimeout(6000); await attendreLoader();
+        note('Pagination réglée sur ' + best + ' | ' + await texte());
+      } else note('Liste déroulante de pagination introuvable');
+    } catch (e) { note('Pagination : ' + e.message); }
+    await page.screenshot({ path: path.join(CAP, '06c-pagination.png') }).catch(() => {});
 
-    /* 3. Export Excel — l'icône Excel n'a ni texte ni info-bulle : inventaire de la barre d'outils, puis choix par icône ou par position (2e bouton de la 2e rangée). */
+    /* 3. Export Excel — icône "Fiche de synthèse visa" (2e bouton, 2e rangée) après "Tout sélectionner" (1er bouton, 1re rangée) */
     let barre = [];
     for (const fr of page.frames()) barre = barre.concat(await fr.evaluate(() => Array.from(document.querySelectorAll('button, a, [role="button"], .btn')).map(e => { const r = e.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), html: e.outerHTML.replace(/\s+/g, ' ').slice(0, 220) }; }).filter(o => o.w >= 24 && o.h >= 24 && o.w <= 90 && o.y > 60 && o.y < 240 && o.x > 400 && o.x < 1000)).catch(() => []));
     barre.sort((p, q) => (p.y - q.y) || (p.x - q.x));
@@ -131,6 +147,9 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
       note('Bouton Excel choisi par position : ' + (cible ? cible.x + ',' + cible.y : 'aucun'));
     } else if (cible) note('Bouton Excel reconnu : ' + cible.html.slice(0, 120));
     if (!cible) throw new Error('Barre d\'outils introuvable — voir journal "Barre d\'outils"');
+    const rang1 = barre.filter(o => Math.abs(o.y - barre[0].y) < 12);
+    const toutSel = rang1[0];
+    if (toutSel && toutSel !== cible) { await page.mouse.click(toutSel.x + toutSel.w / 2, toutSel.y + toutSel.h / 2); await page.waitForTimeout(2500); note('Tout sélectionner cliqué (' + toutSel.x + ',' + toutSel.y + ') | ' + await texte()); await page.screenshot({ path: path.join(CAP, '06d-selection.png') }).catch(() => {}); }
     const [dl] = await Promise.all([
       page.waitForEvent('download', { timeout: 180000 }),
       page.mouse.click(cible.x + cible.w / 2, cible.y + cible.h / 2).then(async () => {
@@ -171,5 +190,5 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     await page.screenshot({ path: path.join(CAP, '99-erreur.png') }).catch(() => {});
     note('ÉCHEC : ' + e.message);
     console.error('Échec : ' + e.message); process.exitCode = 1;
-  } finally { fs.writeFileSync(path.join(CAP, 'journal.txt'), journal.join('\n')); await browser.close(); }
+  } finally { note('API captées (fin) : ' + JSON.stringify(api)); fs.writeFileSync(path.join(CAP, 'journal.txt'), journal.join('\n')); await browser.close(); }
 })();
