@@ -24,26 +24,28 @@ async function premier(page, sels, t = 15000) {
   const ctx = await browser.newContext({ acceptDownloads: true, locale: 'fr-FR', viewport: { width: 1600, height: 1000 } });
   const page = await ctx.newPage();
   try {
-    /* 1. Connexion */
+    /* 1. Connexion — Kairnial affiche "Please wait…" puis redirige vers la page de connexion (identifiant, puis mot de passe) */
     await page.goto(URL, { waitUntil: 'domcontentloaded' });
-    /* Kairnial : 1) identifiant seul + bouton "Connexion"  2) page du mot de passe */
-    const user = await premier(page, ['input[placeholder*="Identifiant" i]', 'input[type="email"]', 'input[name*="login" i]', 'input[name*="user" i]', 'input[name*="mail" i]', 'input[type="text"]'], 45000);
+    await page.locator('text=/Please wait|Veuillez patienter/i').first().waitFor({ state: 'hidden', timeout: 60000 }).catch(() => {});
+    const user = await premier(page, ['#username', 'input[name="username"]', 'input[placeholder*="Identifiant" i]', 'input[type="email"]', 'input[name*="login" i]', 'input[name*="user" i]', 'input[type="text"]'], 60000);
+    await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(CAP, '01-login.png') });
-    await user.click(); await user.fill(LOGIN);
-    const btn1 = page.locator('button:has-text("Connexion"), button:has-text("Login"), button:has-text("Suivant"), button:has-text("Continuer"), button[type="submit"]').first();
-    if (await btn1.count()) await btn1.click().catch(() => {}); else await user.press('Enter');
-    await page.waitForTimeout(1500);
+    await user.fill(LOGIN, { timeout: 15000 }).catch(async () => { await user.click({ force: true }); await page.keyboard.type(LOGIN); });
+    const btn1 = page.locator('#kc-login, button:has-text("Connexion"), input[type="submit"], button[type="submit"], button:has-text("Login"), button:has-text("Suivant"), button:has-text("Continuer")').first();
+    if (await btn1.count()) await btn1.click({ timeout: 10000 }).catch(() => page.keyboard.press('Enter')); else await page.keyboard.press('Enter');
+    await page.waitForTimeout(2000);
     await page.screenshot({ path: path.join(CAP, '02-apres-identifiant.png') });
-    const pwd = await premier(page, ['input[type="password"]'], 45000);
-    await pwd.click(); await pwd.fill(PASS);
-    const btn2 = page.locator('button:has-text("Connexion"), button:has-text("Login"), button:has-text("Se connecter"), button[type="submit"]').first();
-    if (await btn2.count()) await btn2.click().catch(() => {}); else await pwd.press('Enter');
-    await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {});
-    await page.waitForTimeout(3000);
+    const pwd = await premier(page, ['#password', 'input[name="password"]', 'input[type="password"]'], 60000);
+    await pwd.fill(PASS, { timeout: 15000 }).catch(async () => { await pwd.click({ force: true }); await page.keyboard.type(PASS); });
+    const btn2 = page.locator('#kc-login, button:has-text("Connexion"), input[type="submit"], button[type="submit"], button:has-text("Login"), button:has-text("Se connecter")').first();
+    if (await btn2.count()) await btn2.click({ timeout: 10000 }).catch(() => page.keyboard.press('Enter')); else await page.keyboard.press('Enter');
+    await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {});
+    await page.locator('text=/Please wait|Veuillez patienter/i').first().waitFor({ state: 'hidden', timeout: 60000 }).catch(() => {});
+    await page.waitForTimeout(4000);
     await page.screenshot({ path: path.join(CAP, '03-apres-connexion.png') });
-    if (await page.locator('input[type="password"]').isVisible().catch(() => false)) throw new Error('Connexion refusée (identifiant ou mot de passe)');
+    if (await page.locator('input[type="password"]').first().isVisible().catch(() => false)) throw new Error('Connexion refusée (identifiant ou mot de passe)');
     /* Revenir sur la liste des fichiers si Kairnial a atterri ailleurs */
-    if (!/rfiles/.test(page.url())) { await page.goto(URL, { waitUntil: 'domcontentloaded' }); await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {}); await page.waitForTimeout(3000); }
+    if (!/rfiles/.test(page.url())) { await page.goto(URL, { waitUntil: 'domcontentloaded' }); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await page.waitForTimeout(4000); }
 
     /* 2. Projet HMIMV puis liste des fichiers (si l'URL n'y mène pas déjà) */
     await page.screenshot({ path: path.join(CAP, '04-accueil.png') });
