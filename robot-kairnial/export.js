@@ -9,21 +9,24 @@ if (!KURL || !LOGIN || !PASS) { console.error('Secrets KAIRNIAL_URL / KAIRNIAL_L
 const CAP = path.join(__dirname, 'captures'); fs.mkdirSync(CAP, { recursive: true });
 const DL = path.join(__dirname, 'dl'); fs.mkdirSync(DL, { recursive: true });
 
-/* Premier élément visible parmi plusieurs repères, cherché dans la page ET dans tous ses cadres (le formulaire Kairnial est dans une iframe). */
+/* Premier élément visible parmi plusieurs repères, cherché dans la page ET dans tous ses cadres. */
 async function premier(page, sels, t = 15000) {
   const fin = Date.now() + t;
   while (Date.now() < fin) {
     for (const s of sels) for (const fr of page.frames()) {
-      const l = fr.locator(s).first();
-      if (await l.count().catch(() => 0) && await l.isVisible().catch(() => false)) { l._repere = s; return l; }
+      const n = Math.min(await fr.locator(s).count().catch(() => 0), 15);
+      for (let i = 0; i < n; i++) { const l = fr.locator(s).nth(i); if (await l.isVisible().catch(() => false)) { l._repere = s; return l; } }
     }
     await page.waitForTimeout(300);
   }
   throw new Error('Repère introuvable : ' + sels.join(' | '));
 }
-/* Premier bouton visible, tous cadres confondus ; sinon null. */
+/* Premier élément visible, tous cadres confondus ; sinon null. */
 async function bouton(page, sel) {
-  for (const fr of page.frames()) { const l = fr.locator(sel).first(); if (await l.count().catch(() => 0) && await l.isVisible().catch(() => false)) return l; }
+  for (const fr of page.frames()) {
+    const n = Math.min(await fr.locator(sel).count().catch(() => 0), 15);
+    for (let i = 0; i < n; i++) { const l = fr.locator(sel).nth(i); if (await l.isVisible().catch(() => false)) return l; }
+  }
   return null;
 }
 
@@ -80,7 +83,7 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     if (await bouton(page, 'input[type="password"]')) throw new Error('Connexion refusée (identifiant ou mot de passe) — voir 04-apres-connexion.png');
     if (!/rfiles/.test(page.url())) { await page.goto(KURL, { waitUntil: 'domcontentloaded' }); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(4000); }
 
-    /* 2. Projet HMIMV puis Documents */
+    /* 2. Projet HMIMV puis liste des fichiers */
     await page.screenshot({ path: path.join(CAP, '05-accueil.png') });
     if (PROJET) {
       const p = await bouton(page, 'text=' + PROJET);
@@ -93,8 +96,12 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
       } else note('Projet "' + PROJET + '" non trouvé à l\'écran — on continue');
     }
     if (!(await bouton(page, 'input[placeholder*="Recherche" i]'))) {
-      const docs = await bouton(page, 'a:has-text("Documents"), [role="menuitem"]:has-text("Documents"), li:has-text("Documents"), text=Documents');
-      if (docs) { note('Clic sur Documents'); await docs.click(); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); }
+      note('Ouverture directe de la liste des fichiers');
+      await page.goto(KURL, { waitUntil: 'domcontentloaded' }); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(3000);
+      if (!(await bouton(page, 'input[placeholder*="Recherche" i]'))) {
+        const docs = await bouton(page, 'a:has-text("Documents"), [role="menuitem"]:has-text("Documents"), li:has-text("Documents"), span:has-text("Documents"), div:has-text("Documents")');
+        if (docs) { note('Clic sur Documents'); await docs.click({ timeout: 10000 }).catch(() => {}); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); }
+      }
     }
     await premier(page, ['input[placeholder*="Recherche" i]', 'text=Derniers items'], 60000).catch(() => {});
     await page.waitForTimeout(3000);
@@ -125,7 +132,7 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     if (!rows.length) throw new Error('Export vide');
     const cols = Object.keys(rows[0]);
     const col = re => cols.find(c => re.test(c.normalize('NFD').replace(/[\u0300-\u036f]/g, ''))) || '';
-    const C = { code: col(/^(code|nom|name|reference|fichier|document)/i), titre: col(/titre|title|description|designation/i), indice: col(/indice|revision|version/i), emetteur: col(/emetteur|auteur|author|depose par|uploaded/i), date: col(/date/i), etat: col(/etat|statut|status/i) };
+    const C = { code: col(/^(code|nom|name|reference|fichier|document)/i), titre: col(/titre|title|description|designation/i), indice: col(/indice|revision|version/i), emetteur: col(/emetteur|auteur|author|depose par|uploaded/i), date: col(/date/i), etat: col(/etat|statut|status/i), dossier: col(/dossier|chemin|folder|path|repertoire/i) };
     const visaCols = cols.filter(c => /BCT|BSI|LUS|visa|avis/i.test(c) && c !== C.etat);
     const avis = v => { const a = String(v || '').toUpperCase(); return !a ? 'ATT' : /REF|DEFAV|REJ/.test(a) ? 'REF' : /VAO|OBS|RESERV/.test(a) ? 'VAO' : /VSO|VALID|FAVOR|APPROUV|APPROV/.test(a) ? 'VSO' : /NON CONCERN|^NC$|N\/A/.test(a) ? 'NC' : /ATTENTE|PENDING|EN COURS/.test(a) ? 'ATT' : 'ATT'; };
     const out = rows.map(r => {
@@ -133,7 +140,9 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
       const code = brut.split('_')[0].trim();
       const p = code.split('-');
       const visas = visaCols.map(c => ({ k: (c.match(/BCT|BSI|LUS/i) || [c.slice(0, 3)])[0].toUpperCase(), avis: avis(r[c]) }));
-      return { code, titre: String(r[C.titre] || brut), lot: p[3] || '', type: p[4] || '', bat: p[5] || '', niveau: p[7] || '', indice: String(r[C.indice] || p[9] || '00').padStart(2, '0'), emetteur: String(r[C.emetteur] || ''), date: r[C.date] ? new Date(r[C.date]).toISOString() : '', etat: r[C.etat] ? avis(r[C.etat]) : undefined, visas };
+      const dossier = String(r[C.dossier] || '');
+      const phase = (p[1] || '').toUpperCase() || ((dossier.match(/\b(EXE|APD|APS|MARCHE|MARCHÉ|REFERENCE|RÉFÉRENCE)\b/i) || ['', ''])[1].toUpperCase());
+      return { code, titre: String(r[C.titre] || brut), phase, dossier, lot: p[3] || '', type: p[4] || '', bat: (p[5] || '').toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(r[C.indice] || p[9] || '00').padStart(2, '0'), emetteur: String(r[C.emetteur] || ''), date: r[C.date] ? new Date(r[C.date]).toISOString() : '', etat: r[C.etat] ? avis(r[C.etat]) : undefined, visas };
     }).filter(d => /^HMIMV-/i.test(d.code));
     if (!out.length) throw new Error('Aucun code HMIMV reconnu — colonnes : ' + cols.join(', '));
     fs.writeFileSync(path.join(__dirname, '..', 'kairnial.json'), JSON.stringify({ ok: true, date: new Date().toISOString(), colonnes: cols, docs: out }));
