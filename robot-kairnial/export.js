@@ -9,7 +9,6 @@ if (!KURL || !LOGIN || !PASS) { console.error('Secrets KAIRNIAL_URL / KAIRNIAL_L
 const CAP = path.join(__dirname, 'captures'); fs.mkdirSync(CAP, { recursive: true });
 const DL = path.join(__dirname, 'dl'); fs.mkdirSync(DL, { recursive: true });
 
-/* Premier élément visible parmi plusieurs repères, cherché dans la page ET dans tous ses cadres. */
 async function premier(page, sels, t = 15000) {
   const fin = Date.now() + t;
   while (Date.now() < fin) {
@@ -21,7 +20,6 @@ async function premier(page, sels, t = 15000) {
   }
   throw new Error('Repère introuvable : ' + sels.join(' | '));
 }
-/* Premier élément visible, tous cadres confondus ; sinon null. */
 async function bouton(page, sel) {
   for (const fr of page.frames()) {
     const n = Math.min(await fr.locator(sel).count().catch(() => 0), 15);
@@ -36,7 +34,8 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
 (async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ acceptDownloads: true, locale: 'fr-FR', viewport: { width: 1600, height: 1000 } });
-  const page = await ctx.newPage();
+  let page = await ctx.newPage();
+  ctx.on('page', async p => { try { await p.waitForLoadState('domcontentloaded'); page = p; note('Nouvel onglet : ' + p.url().slice(0, 60)); } catch (e) {} });
   const ou = () => { try { const u = new URL(page.url()); return u.host + u.pathname + u.hash.slice(0, 40); } catch (e) { return '?'; } };
   const texte = async () => { let s = ''; for (const fr of page.frames()) s += ' ' + (await fr.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '')); return s.replace(/\s+/g, ' ').slice(0, 400); };
   const attendreLoader = async (t = 60000) => { const fin = Date.now() + t; while (Date.now() < fin) { let vis = false; for (const fr of page.frames()) for (const e of await fr.locator('text=/Veuillez patienter|Please wait/i').all().catch(() => [])) if (await e.isVisible().catch(() => false)) { vis = true; break; } if (!vis) return; await page.waitForTimeout(300); } };
@@ -95,17 +94,28 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
         note('Après choix du projet : ' + ou() + ' | ' + await texte());
       } else note('Projet "' + PROJET + '" non trouvé à l\'écran — on continue');
     }
-    if (!(await bouton(page, 'input[placeholder*="Recherche" i]'))) {
-      note('Ouverture directe de la liste des fichiers');
-      await page.goto(KURL, { waitUntil: 'domcontentloaded' }); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(3000);
-      if (!(await bouton(page, 'input[placeholder*="Recherche" i]'))) {
-        const docs = await bouton(page, 'a:has-text("Documents"), [role="menuitem"]:has-text("Documents"), li:has-text("Documents"), span:has-text("Documents"), div:has-text("Documents")');
-        if (docs) { note('Clic sur Documents'); await docs.click({ timeout: 10000 }).catch(() => {}); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); }
-      }
+    const diag = async (tag) => { const d = []; for (const fr of page.frames()) { const i = await fr.evaluate(() => ({ u: location.href.slice(0, 70), inputs: document.querySelectorAll('input').length, boutons: document.querySelectorAll('button,[role="button"]').length, shadow: Array.from(document.querySelectorAll('*')).filter(e => e.shadowRoot).length, texte: (document.body && document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 120) })).catch(() => null); if (i) d.push(JSON.stringify(i)); } note('DIAG ' + tag + ' : ' + d.join(' ## ')); };
+    const listeOK = async () => !!(await bouton(page, 'input[placeholder*="Recherche" i], text=Derniers items, text=Mes fichiers'));
+    if (!(await listeOK())) {
+      note('Rechargement complet sur la liste des fichiers');
+      await page.goto(KURL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(5000);
+      await page.screenshot({ path: path.join(CAP, '06a-apres-rechargement.png') }).catch(() => {});
+      await diag('après rechargement');
     }
-    await premier(page, ['input[placeholder*="Recherche" i]', 'text=Derniers items'], 60000).catch(() => {});
+    if (!(await listeOK())) {
+      const docs = await bouton(page, 'a:has-text("Documents"), [role="menuitem"]:has-text("Documents"), li:has-text("Documents"), span:has-text("Documents")');
+      if (docs) {
+        note('Clic sur Documents (' + (await docs.evaluate(e => e.tagName + ' ' + (e.getAttribute('href') || e.getAttribute('ui-sref') || e.getAttribute('ng-click') || '')).catch(() => '?')) + ')');
+        await docs.click({ timeout: 10000 }).catch(() => {});
+        for (let n = 0; n < 6 && !(await listeOK()); n++) { await page.waitForTimeout(10000); await attendreLoader(); await page.screenshot({ path: path.join(CAP, '06b-attente-' + n + '.png') }).catch(() => {}); }
+        await diag('après clic Documents');
+      } else note('Menu Documents introuvable');
+    }
     await page.waitForTimeout(3000);
     note('Liste des documents : ' + ou() + ' | ' + await texte());
+    await diag('liste');
     await page.screenshot({ path: path.join(CAP, '06-documents.png') });
     try { let inv = []; for (const fr of page.frames()) inv = inv.concat(await fr.evaluate(() => Array.from(document.querySelectorAll('button')).filter(b => b.offsetParent).slice(0, 40).map(b => (b.getAttribute('title') || b.getAttribute('aria-label') || b.getAttribute('data-tooltip') || '') + ' ~ ' + ((b.querySelector('i,svg') || {}).className || {}).baseVal || ((b.querySelector('i,svg') || {}).className || '') + ' ~ ' + b.innerText.trim().slice(0, 20))).catch(() => [])); note('Boutons : ' + inv.join(' || ')); } catch (e) {}
 
