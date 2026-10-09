@@ -8,7 +8,8 @@
     { k: 'saisie', lab: 'Saisie terrain', href: 'Saisie terrain - NHM.html', c: '#E8A13C' },
     { k: 'carto', lab: 'Cartographie', href: 'index.html', c: '#5B8DEF' },
     { k: 'resultats', lab: 'R\u00e9sultats', href: 'Resultats - NHM.html', c: '#57B26B' },
-    { k: 'vue3d', lab: 'Vue 3D', href: 'Vue 3D.html', c: '#E8632B' }
+    { k: 'vue3d', lab: 'Vue 3D', href: 'Vue 3D.html', c: '#E8632B' },
+    { k: 'docs', lab: 'Documents', href: 'Documents Kairnial.html', c: '#9B7BD4' }
   ];
   var CSS = ':host{display:block;position:fixed;top:0;left:0;right:0;z-index:2147483000;font-family:"Archivo Narrow",Arial,sans-serif;}' +
     '.b{display:flex;align-items:center;gap:6px;height:38px;padding:0 10px 0 6px;background:#1F2620;color:#F2F1ED;box-shadow:0 2px 10px rgba(0,0,0,.25);}' +
