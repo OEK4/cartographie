@@ -1,4 +1,5 @@
-/* Robot Kairnial — se connecte avec VOTRE login (secrets GitHub), exporte la liste des documents, écrit kairnial.json. */
+/* Robot Kairnial — se connecte avec VOTRE login (secrets GitHub), exporte la liste des documents, écrit kairnial.json.
+   Les repères de page (sélecteurs) sont des hypothèses : à ajuster après le premier essai avec les captures d'écran. */
 const { chromium } = require('playwright');
 const XLSX = require('xlsx');
 const fs = require('fs');
@@ -9,9 +10,11 @@ if (!KURL || !LOGIN || !PASS) { console.error('Secrets KAIRNIAL_URL / KAIRNIAL_L
 const CAP = path.join(__dirname, 'captures'); fs.mkdirSync(CAP, { recursive: true });
 const DL = path.join(__dirname, 'dl'); fs.mkdirSync(DL, { recursive: true });
 
+/* Premier élément visible parmi plusieurs repères, cherché dans la page ET dans tous ses cadres (le formulaire Kairnial est dans une iframe). */
 async function premier(page, sels, t = 15000) {
   const fin = Date.now() + t;
   while (Date.now() < fin) {
+    /* Repères dans l'ordre de priorité, puis cadres : le vrai champ "Identifiant" de l'iframe gagne sur un champ texte quelconque de la page. */
     for (const s of sels) for (const fr of page.frames()) {
       const n = Math.min(await fr.locator(s).count().catch(() => 0), 15);
       for (let i = 0; i < n; i++) { const l = fr.locator(s).nth(i); if (await l.isVisible().catch(() => false)) { l._repere = s; return l; } }
@@ -20,6 +23,7 @@ async function premier(page, sels, t = 15000) {
   }
   throw new Error('Repère introuvable : ' + sels.join(' | '));
 }
+/* Premier bouton visible, tous cadres confondus ; sinon null. */
 async function bouton(page, sel) {
   for (const fr of page.frames()) {
     const n = Math.min(await fr.locator(sel).count().catch(() => 0), 15);
@@ -35,15 +39,18 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ acceptDownloads: true, locale: 'fr-FR', viewport: { width: 1600, height: 1000 } });
   let page = await ctx.newPage();
+  /* Si Kairnial ouvre un module dans un nouvel onglet, on bascule dessus */
   /* Écoute des réponses du serveur : la liste des documents arrive en JSON — on garde celles qui contiennent des codes HMIMV */
   const api = []; let nApi = 0;
-  ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (!/json/i.test(ct)) return; const t = await rep.text(); if (!/HMIMV-/.test(t)) return; const u = rep.url(); const req = rep.request(); const post = (req.postData() || '').slice(0, 300); api.push({ url: u.replace(/\?.*/, '').slice(0, 160), method: req.method(), post, taille: t.length, nb: (t.match(/HMIMV-/g) || []).length }); if (nApi < 3) { nApi++; fs.writeFileSync(path.join(CAP, 'api-' + nApi + '.json'), t.slice(0, 400000)); } } catch (e) {} });
+  ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (/image|font|css|javascript|octet/i.test(ct)) return; const t = await rep.text(); if (!/HMIMV-/.test(t)) return; const u = rep.url(); const req = rep.request(); const post = (req.postData() || '').slice(0, 300); api.push({ url: u.replace(/\?.*/, '').slice(0, 160), ct: ct.slice(0, 40), method: req.method(), post, taille: t.length, nb: (t.match(/HMIMV-/g) || []).length }); if (nApi < 3) { nApi++; fs.writeFileSync(path.join(CAP, 'api-' + nApi + '.json'), t.slice(0, 400000)); } } catch (e) {} });
   ctx.on('page', async p => { try { await p.waitForLoadState('domcontentloaded'); page = p; note('Nouvel onglet : ' + p.url().slice(0, 60)); } catch (e) {} });
+  /* Adresse sans paramètres (pas de jeton dans le journal) */
   const ou = () => { try { const u = new URL(page.url()); return u.host + u.pathname + u.hash.slice(0, 40); } catch (e) { return '?'; } };
   const texte = async () => { let s = ''; for (const fr of page.frames()) s += ' ' + (await fr.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '')); return s.replace(/\s+/g, ' ').slice(0, 400); };
   const attendreLoader = async (t = 60000) => { const fin = Date.now() + t; while (Date.now() < fin) { let vis = false; for (const fr of page.frames()) for (const e of await fr.locator('text=/Veuillez patienter|Please wait/i').all().catch(() => [])) if (await e.isVisible().catch(() => false)) { vis = true; break; } if (!vis) return; await page.waitForTimeout(300); } };
   try {
-    /* 1. Connexion */
+    /* 1. Connexion — Kairnial affiche un écran "Veuillez patienter" puis la page de connexion.
+       Le champ mot de passe peut n'apparaître qu'après la saisie de l'identifiant : on tape lentement, on attend, puis on clique "Connexion" si besoin. */
     await page.goto(KURL, { waitUntil: 'domcontentloaded' });
     await attendreLoader();
     const SEL_USER = ['input[placeholder*="Identifiant" i]', '#username', 'input[name="username"]', 'input[type="email"]', 'input[name*="login" i]', 'input[name*="user" i]', 'input[placeholder*="mail" i]', 'form input[type="text"]'];
@@ -85,7 +92,7 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     if (await bouton(page, 'input[type="password"]')) throw new Error('Connexion refusée (identifiant ou mot de passe) — voir 04-apres-connexion.png');
     if (!/rfiles/.test(page.url())) { await page.goto(KURL, { waitUntil: 'domcontentloaded' }); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(4000); }
 
-    /* 2. Projet HMIMV puis liste des fichiers */
+    /* 2. Projet HMIMV puis liste des fichiers (si l'URL n'y mène pas déjà) */
     await page.screenshot({ path: path.join(CAP, '05-accueil.png') });
     if (PROJET) {
       const p = await bouton(page, 'text=' + PROJET);
@@ -97,9 +104,11 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
         note('Après choix du projet : ' + ou() + ' | ' + await texte());
       } else note('Projet "' + PROJET + '" non trouvé à l\'écran — on continue');
     }
+    /* Menu latéral "Documents" (page d'accueil du projet avec la photo) */
     const diag = async (tag) => { const d = []; for (const fr of page.frames()) { const i = await fr.evaluate(() => ({ u: location.href.slice(0, 70), inputs: document.querySelectorAll('input').length, boutons: document.querySelectorAll('button,[role="button"]').length, shadow: Array.from(document.querySelectorAll('*')).filter(e => e.shadowRoot).length, texte: (document.body && document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 120) })).catch(() => null); if (i) d.push(JSON.stringify(i)); } note('DIAG ' + tag + ' : ' + d.join(' ## ')); };
     const listeOK = async () => !!(await bouton(page, 'text=Derniers items, text=Mes fichiers, input[placeholder*="Recherche" i]'));
     if (!(await listeOK())) {
+      /* Changer d'adresse ne suffit pas : rechargement complet sur la liste des fichiers */
       note('Rechargement complet sur la liste des fichiers');
       await page.goto(KURL, { waitUntil: 'domcontentloaded' }).catch(() => {});
       await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
@@ -134,58 +143,138 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     } catch (e) { note('Pagination : ' + e.message); }
     await page.screenshot({ path: path.join(CAP, '06c-pagination.png') }).catch(() => {});
 
-    /* 3. Export Excel — icône "Fiche de synthèse visa" (2e bouton, 2e rangée) après "Tout sélectionner" (1er bouton, 1re rangée) */
+    /* 3. Lecture de la liste à l'écran, page après page (l'export Excel ne couvre que la sélection d'une page). */
+    const lireVisible = async () => {
+      let rows = [];
+      for (const fr of page.frames()) {
+        let r = [];
+        try {
+          r = await fr.evaluate(() => {
+            const out = [];
+            const titres = Array.from(document.querySelectorAll('a, span, div, b, strong, h4, h5')).filter(e => e.children.length <= 1 && /^HMIMV-[A-Z0-9-]+\.[a-z0-9]{2,5}$/i.test((e.innerText || '').trim()));
+            const vus = new Set();
+            for (const t of titres) {
+              let row = t;
+              for (let i = 0; i < 8 && row.parentElement; i++) { row = row.parentElement; const tx = row.innerText || ''; if (/\d{2}\/\d{2}\/\d{4}/.test(tx) && row.getBoundingClientRect().height < 600) break; }
+              if (vus.has(row)) continue; vus.add(row);
+              const tx = (row.innerText || '').replace(/\s+/g, ' ');
+              const m = tx.match(/([A-ZÀ-Ü][A-ZÀ-Ü' .-]{2,60}?) (\d{2}\/\d{2}\/\d{4})/);
+              const desc = (tx.match(/\[(.*?)\]/) || ['', ''])[1];
+              const badges = Array.from(row.querySelectorAll('span, div, a, label')).filter(e => e.children.length === 0 && /^(\d{2}-[A-Z]{2,4} - |Lot \d+)/.test((e.innerText || '').trim())).map(e => { const cs = getComputedStyle(e); return { t: e.innerText.trim(), bg: cs.backgroundColor, fg: cs.color, title: e.getAttribute('title') || e.getAttribute('data-original-title') || e.getAttribute('tooltip') || '' }; });
+              out.push({ fichier: t.innerText.trim(), desc, emetteur: m ? m[1].trim() : '', date: m ? m[2] : '', badges, html: out.length < 2 ? row.outerHTML.replace(/\s+/g, ' ').slice(0, 3000) : '' });
+            }
+            return out;
+          });
+        } catch (e) { r = []; }
+        rows = rows.concat(r);
+      }
+      return rows;
+    };
+    const t0 = await texte();
+    const total = parseInt((t0.match(/de (\d+) Fichiers/) || [0, 0])[1]) || 0;
+    const parPage = parseInt((t0.match(/1 - (\d+) de/) || [0, 50])[1]) || 50;
+    const nbPages = total ? Math.ceil(total / parPage) : 1;
+    note('Total ' + total + ' fichiers, ' + parPage + ' par page, ' + nbPages + ' pages');
+    const tous = new Map(); const exemples = []; const histo = {}; let colonnesRapport = []; let nbRapports = 0;
+    /* Barre d'outils : ■ (afficher les cases) = 1er bouton 1re rangée ; icône Excel "Fiche de synthèse visa" = 2e bouton 2e rangée */
     let barre = [];
-    for (const fr of page.frames()) barre = barre.concat(await fr.evaluate(() => Array.from(document.querySelectorAll('button, a, [role="button"], .btn')).map(e => { const r = e.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), html: e.outerHTML.replace(/\s+/g, ' ').slice(0, 220) }; }).filter(o => o.w >= 24 && o.h >= 24 && o.w <= 90 && o.y > 60 && o.y < 240 && o.x > 400 && o.x < 1000)).catch(() => []));
+    for (const fr of page.frames()) barre = barre.concat(await fr.evaluate(() => Array.from(document.querySelectorAll('button, a, [role="button"], .btn, [ng-click]')).map(e => { const r = e.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), t: (e.getAttribute('title') || '').slice(0, 60) }; }).filter(o => o.w >= 24 && o.h >= 24 && o.w <= 90 && o.y > 60 && o.y < 240 && o.x > 400 && o.x < 1000)).catch(() => []));
     barre.sort((p, q) => (p.y - q.y) || (p.x - q.x));
-    note('Barre d\'outils (' + barre.length + ') : ' + barre.map(o => o.x + ',' + o.y + ' ' + o.html.replace(/"/g, "'")).join(' || '));
-    let cible = barre.find(o => /excel|xls|file-export|export/i.test(o.html));
-    if (!cible && barre.length) {
-      const rangs = []; barre.forEach(o => { const r = rangs.find(g => Math.abs(g.y - o.y) < 12); if (r) r.items.push(o); else rangs.push({ y: o.y, items: [o] }); });
-      const r2 = rangs.find(g => g.items.length >= 4) || rangs[rangs.length - 1];
-      cible = r2 && (r2.items[1] || r2.items[0]);
-      note('Bouton Excel choisi par position : ' + (cible ? cible.x + ',' + cible.y : 'aucun'));
-    } else if (cible) note('Bouton Excel reconnu : ' + cible.html.slice(0, 120));
-    if (!cible) throw new Error('Barre d\'outils introuvable — voir journal "Barre d\'outils"');
-    const rang1 = barre.filter(o => Math.abs(o.y - barre[0].y) < 12);
-    const toutSel = rang1[0];
-    if (toutSel && toutSel !== cible) { await page.mouse.click(toutSel.x + toutSel.w / 2, toutSel.y + toutSel.h / 2); await page.waitForTimeout(2500); note('Tout sélectionner cliqué (' + toutSel.x + ',' + toutSel.y + ') | ' + await texte()); await page.screenshot({ path: path.join(CAP, '06d-selection.png') }).catch(() => {}); }
-    const [dl] = await Promise.all([
-      page.waitForEvent('download', { timeout: 180000 }),
-      page.mouse.click(cible.x + cible.w / 2, cible.y + cible.h / 2).then(async () => {
-        for (let n = 0; n < 8; n++) {
-          await page.waitForTimeout(2000);
-          await page.screenshot({ path: path.join(CAP, '07-export-' + n + '.png') }).catch(() => {});
-          note('Après clic export ' + n + ' : ' + await texte());
-          const x = await bouton(page, 'button:has-text("Exporter"), button:has-text("Export"), button:has-text("Valider"), button:has-text("Télécharger"), button:has-text("OK"), button:has-text("Confirmer"), button:has-text("Oui"), a:has-text("Exporter"), text=/Excel|xlsx/i');
-          if (x) { note('Confirmation export : ' + (await x.innerText().catch(() => '?'))); await x.click().catch(() => {}); } else break;
+    const rangs = []; barre.forEach(o => { const r = rangs.find(g => Math.abs(g.y - o.y) < 12); if (r) r.items.push(o); else rangs.push({ y: o.y, items: [o] }); });
+    const btnCases = barre.find(o => /lectionner tous/i.test(o.t)) || (rangs[0] && rangs[0].items[0]);
+    const r2 = rangs.find(g => g.items.length >= 4) || rangs[rangs.length - 1];
+    const btnExcel = barre.find(o => /synth|visa|excel/i.test(o.t)) || (r2 && r2.items[1]);
+    note('Boutons : cases=' + JSON.stringify(btnCases) + ' excel=' + JSON.stringify(btnExcel));
+    const clic = async o => { await page.mouse.click(o.x + o.w / 2, o.y + o.h / 2); };
+    /* Cases à cocher des lignes visibles : centre + état */
+    const cases = async () => { let c = []; for (const fr of page.frames()) c = c.concat(await fr.evaluate(() => Array.from(document.querySelectorAll('input[type="checkbox"], [role="checkbox"], .k-checkbox, [class*="checkbox"]')).map(e => { const r = e.getBoundingClientRect(); const on = e.checked === true || e.getAttribute('aria-checked') === 'true' || /checked|selected|active/i.test(e.className); return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, on }; }).filter(o => o.w >= 10 && o.w <= 40 && o.y > 200 && o.y < 960 && o.x > 520 && o.x < 760)).catch(() => [])); return c; };
+    const rapportPage = async (pg) => {
+      let cs = await cases();
+      if (!cs.length && btnCases) { await clic(btnCases); await page.waitForTimeout(1500); cs = await cases(); }
+      if (!cs.length) { note('Page ' + pg + ' : aucune case à cocher visible'); return; }
+      /* Cocher chaque fichier (défilement de la liste pour atteindre les lignes du bas) */
+      let coches = 0;
+      for (let tour = 0; tour < 12; tour++) {
+        cs = await cases();
+        const todo = cs.filter(c => !c.on);
+        for (const c of todo) { await page.mouse.click(c.x, c.y); coches++; await page.waitForTimeout(120); }
+        await page.mouse.move(900, 600); await page.mouse.wheel(0, 700); await page.waitForTimeout(500);
+        const apres = await cases(); if (!apres.some(c => !c.on) && tour > 0 && apres.length === cs.length) break;
+      }
+      await page.mouse.wheel(0, -20000); await page.waitForTimeout(400);
+      if (pg === 1) await page.screenshot({ path: path.join(CAP, '09-coches.png') }).catch(() => {});
+      if (!btnExcel) { note('Icône Excel introuvable'); return; }
+      const dlP = page.waitForEvent('download', { timeout: 240000 }).catch(() => null);
+      await clic(btnExcel); await page.waitForTimeout(2000);
+      /* Fenêtre "Options d'export" : tout sur Oui puis Générer le rapport */
+      for (let k = 0; k < 3; k++) { const non = await bouton(page, 'text=/^Non$/'); if (!non) break; await non.click().catch(() => {}); await page.waitForTimeout(400); }
+      if (pg === 1) await page.screenshot({ path: path.join(CAP, '10-options-export.png') }).catch(() => {});
+      const gen = await bouton(page, 'button:has-text("Générer le rapport"), button:has-text("Générer"), text=/Générer le rapport/');
+      if (gen) await gen.click().catch(() => {}); else note('Page ' + pg + ' : bouton "Générer le rapport" introuvable | ' + await texte());
+      /* Génération : barre de progression, puis fichier (téléchargement direct ou lien à cliquer). On attend jusqu'à 4 min. */
+      let dl = null; const debut = Date.now();
+      while (!dl && Date.now() - debut < 240000) {
+        dl = await Promise.race([dlP, page.waitForTimeout(3000).then(() => null)]);
+        if (dl) break;
+        const lien = await bouton(page, 'a[href*=".xls"], a[download], a:has-text("Télécharger"), button:has-text("Télécharger"), a:has-text("rapport")');
+        if (lien) { note('Page ' + pg + ' : lien de téléchargement cliqué'); await lien.click().catch(() => {}); }
+        if (pg === 1 && Date.now() - debut < 20000) await page.screenshot({ path: path.join(CAP, '11-generation.png') }).catch(() => {});
+      }
+      if (pg === 1) note('Page 1 : génération ' + Math.round((Date.now() - debut) / 1000) + ' s, fichier ' + (dl ? 'reçu' : 'ABSENT') + ' | ' + await texte());
+      if (dl) {
+        const f = path.join(DL, 'rapport-' + String(pg).padStart(3, '0') + '.xlsx'); await dl.saveAs(f); nbRapports++;
+        if (pg === 1) fs.copyFileSync(f, path.join(CAP, 'rapport-page-1.xlsx'));
+        try {
+          const wb = XLSX.readFile(f); const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+          if (rows.length) { colonnesRapport = Object.keys(rows[0]); const kc = colonnesRapport.find(c => rows.some(r => /HMIMV-/i.test(String(r[c])))); rows.forEach(r => { const code = String(r[kc] || '').replace(/\.[a-z0-9]{2,5}$/i, '').split('_')[0].trim(); if (code) (histo[code] = histo[code] || []).push(r); }); }
+          if (pg === 1) note('Rapport page 1 : ' + rows.length + ' lignes, colonnes = ' + colonnesRapport.join(' | '));
+        } catch (e) { note('Lecture rapport page ' + pg + ' : ' + e.message); }
+      } else note('Page ' + pg + ' : pas de téléchargement du rapport');
+      /* Fermer la fenêtre si encore ouverte, puis décocher */
+      const x = await bouton(page, 'button:has-text("×"), [aria-label="Close"], .close, button.k-dialog-close, text=/^×$/'); if (x) await x.click().catch(() => {});
+      await page.keyboard.press('Escape').catch(() => {}); await page.waitForTimeout(500);
+      for (let tour = 0; tour < 12; tour++) { const on = (await cases()).filter(c => c.on); for (const c of on) { await page.mouse.click(c.x, c.y); await page.waitForTimeout(100); } await page.mouse.wheel(0, 700); await page.waitForTimeout(400); if (!(await cases()).some(c => c.on) && tour > 0) break; }
+      await page.mouse.wheel(0, -20000); await page.waitForTimeout(400);
+    };
+    for (let pg = 1; pg <= nbPages && pg <= 400; pg++) {
+      if (pg > 1) {
+        let ok = false;
+        for (const fr of page.frames()) {
+          const cand = fr.locator('a, li, span, button').filter({ hasText: new RegExp('^\\s*' + pg + '\\s*$') });
+          const n = Math.min(await cand.count().catch(() => 0), 20);
+          for (let i = n - 1; i >= 0; i--) { const l = cand.nth(i); const bb = await l.boundingBox().catch(() => null); if (bb && bb.y > 700 && await l.isVisible().catch(() => false)) { await l.click({ timeout: 5000 }).catch(() => {}); ok = true; break; } }
+          if (ok) break;
         }
-      })
-    ]);
-    const file = path.join(DL, dl.suggestedFilename() || 'export.xlsx');
-    await dl.saveAs(file);
+        if (!ok) { note('Page ' + pg + ' : bouton de pagination introuvable — arrêt'); break; }
+        await page.waitForTimeout(2500); await attendreLoader();
+        const attendu = ((pg - 1) * parPage + 1) + ' - ';
+        for (let w = 0; w < 10; w++) { if ((await texte()).includes(attendu)) break; await page.waitForTimeout(1000); }
+      }
+      const rows = await lireVisible();
+      rows.forEach(r => { if (r.html && exemples.length < 2) exemples.push(r.html); delete r.html; tous.set(r.fichier, r); });
+      if (pg % 10 === 1) { note('Page ' + pg + '/' + nbPages + ' : ' + rows.length + ' lignes, cumul ' + tous.size); await page.screenshot({ path: path.join(CAP, '08-page-' + String(pg).padStart(3, '0') + '.png') }).catch(() => {}); }
+      if (!rows.length) { note('Page ' + pg + ' vide — arrêt'); break; }
+      try { await rapportPage(pg); } catch (e) { note('Rapport page ' + pg + ' : ' + e.message); await page.keyboard.press('Escape').catch(() => {}); }
+    }
+    note('Rapports téléchargés : ' + nbRapports + ', documents avec historique : ' + Object.keys(histo).length);
+    fs.writeFileSync(path.join(CAP, 'exemples-lignes.html'), exemples.join('\n\n<!-- ---- -->\n\n'));
+    note('Lecture terminée : ' + tous.size + ' documents');
+    if (!tous.size) throw new Error('Aucune ligne lue à l\'écran — voir exemples-lignes.html et captures 08-*');
 
-    /* 4. Lecture et normalisation */
-    const wb = XLSX.readFile(file);
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-    if (!rows.length) throw new Error('Export vide');
-    const cols = Object.keys(rows[0]);
-    const col = re => cols.find(c => re.test(c.normalize('NFD').replace(/[\u0300-\u036f]/g, ''))) || '';
-    const C = { code: col(/^(code|nom|name|reference|fichier|document)/i), titre: col(/titre|title|description|designation/i), indice: col(/indice|revision|version/i), emetteur: col(/emetteur|auteur|author|depose par|uploaded/i), date: col(/date/i), etat: col(/etat|statut|status/i), dossier: col(/dossier|chemin|folder|path|repertoire/i) };
-    const visaCols = cols.filter(c => /BCT|BSI|LUS|visa|avis/i.test(c) && c !== C.etat);
-    const avis = v => { const a = String(v || '').toUpperCase(); return !a ? 'ATT' : /REF|DEFAV|REJ/.test(a) ? 'REF' : /VAO|OBS|RESERV/.test(a) ? 'VAO' : /VSO|VALID|FAVOR|APPROUV|APPROV/.test(a) ? 'VSO' : /NON CONCERN|^NC$|N\/A/.test(a) ? 'NC' : /ATTENTE|PENDING|EN COURS/.test(a) ? 'ATT' : 'ATT'; };
-    const out = rows.map(r => {
-      const brut = String(r[C.code] || '').replace(/\.[a-z0-9]{2,5}$/i, '');
-      const code = brut.split('_')[0].trim();
-      const p = code.split('-');
-      const visas = visaCols.map(c => ({ k: (c.match(/BCT|BSI|LUS/i) || [c.slice(0, 3)])[0].toUpperCase(), avis: avis(r[c]) }));
-      const dossier = String(r[C.dossier] || '');
-      const phase = (p[1] || '').toUpperCase() || ((dossier.match(/\b(EXE|APD|APS|MARCHE|MARCHÉ|REFERENCE|RÉFÉRENCE)\b/i) || ['', ''])[1].toUpperCase());
-      return { code, titre: String(r[C.titre] || brut), phase, dossier, lot: p[3] || '', type: p[4] || '', bat: (p[5] || '').toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(r[C.indice] || p[9] || '00').padStart(2, '0'), emetteur: String(r[C.emetteur] || ''), date: r[C.date] ? new Date(r[C.date]).toISOString() : '', etat: r[C.etat] ? avis(r[C.etat]) : undefined, visas };
-    }).filter(d => /^HMIMV-/i.test(d.code));
-    if (!out.length) throw new Error('Aucun code HMIMV reconnu — colonnes : ' + cols.join(', '));
-    fs.writeFileSync(path.join(__dirname, '..', 'kairnial.json'), JSON.stringify({ ok: true, date: new Date().toISOString(), colonnes: cols, docs: out }));
-    console.log(out.length + ' documents exportés');
+    /* 4. Normalisation — couleur des pastilles : vert = validé, orange = avec observations, rouge = refusé, gris = en attente */
+    const rgb = s => { const m = String(s).match(/(\d+)[, ]+(\d+)[, ]+(\d+)/); return m ? [+m[1], +m[2], +m[3]] : [128, 128, 128]; };
+    const avisCouleur = (bg, fg) => { let [r, g, b] = rgb(bg); if (Math.max(r, g, b) - Math.min(r, g, b) < 40) [r, g, b] = rgb(fg); const sat = Math.max(r, g, b) - Math.min(r, g, b); if (sat < 40) return 'ATT'; if (g > r && g > b) return 'VSO'; if (r > 180 && g > 110 && b < 120) return 'VAO'; if (r > 150 && g < 110) return 'REF'; return 'ATT'; };
+    const out = [];
+    for (const r of tous.values()) {
+      const brut = r.fichier.replace(/\.[a-z0-9]{2,5}$/i, '');
+      const code = brut.split('_')[0].trim(), p = code.split('-');
+      const visas = r.badges.filter(bd => !/^Lot /.test(bd.t)).map(bd => ({ k: (bd.t.match(/^\d{2}-([A-Z]{2,4})/) || ['', bd.t.slice(0, 3)])[1], lab: bd.t, avis: avisCouleur(bd.bg, bd.fg), couleur: bd.bg, info: bd.title }));
+      const lotB = r.badges.find(bd => /^Lot /.test(bd.t));
+      const [dd, mm, yy] = (r.date || '').split('/');
+      out.push({ code, titre: r.desc || brut, phase: (p[1] || '').toUpperCase(), lot: p[3] || (lotB ? (lotB.t.match(/\d+/) || [''])[0] : ''), type: p[4] || '', bat: (p[5] || '').toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(p[9] || '00').padStart(2, '0'), emetteur: r.emetteur, date: yy ? new Date(+yy, +mm - 1, +dd).toISOString() : '', lotLab: lotB ? lotB.t : '', lotAvis: lotB ? avisCouleur(lotB.bg, lotB.fg) : '', visas, historique: histo[code] || [] });
+    }
+    fs.writeFileSync(path.join(__dirname, '..', 'kairnial.json'), JSON.stringify({ ok: true, date: new Date().toISOString(), total, colonnesRapport, docs: out }));
+    console.log(out.length + ' documents lus');
   } catch (e) {
     await page.screenshot({ path: path.join(CAP, '99-erreur.png') }).catch(() => {});
     note('ÉCHEC : ' + e.message);
