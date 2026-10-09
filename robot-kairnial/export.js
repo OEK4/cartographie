@@ -95,7 +95,7 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
       } else note('Projet "' + PROJET + '" non trouvé à l\'écran — on continue');
     }
     const diag = async (tag) => { const d = []; for (const fr of page.frames()) { const i = await fr.evaluate(() => ({ u: location.href.slice(0, 70), inputs: document.querySelectorAll('input').length, boutons: document.querySelectorAll('button,[role="button"]').length, shadow: Array.from(document.querySelectorAll('*')).filter(e => e.shadowRoot).length, texte: (document.body && document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 120) })).catch(() => null); if (i) d.push(JSON.stringify(i)); } note('DIAG ' + tag + ' : ' + d.join(' ## ')); };
-    const listeOK = async () => !!(await bouton(page, 'input[placeholder*="Recherche" i], text=Derniers items, text=Mes fichiers'));
+    const listeOK = async () => !!(await bouton(page, 'text=Derniers items, text=Mes fichiers, input[placeholder*="Recherche" i]'));
     if (!(await listeOK())) {
       note('Rechargement complet sur la liste des fichiers');
       await page.goto(KURL, { waitUntil: 'domcontentloaded' }).catch(() => {});
@@ -117,18 +117,28 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     note('Liste des documents : ' + ou() + ' | ' + await texte());
     await diag('liste');
     await page.screenshot({ path: path.join(CAP, '06-documents.png') });
-    try { let inv = []; for (const fr of page.frames()) inv = inv.concat(await fr.evaluate(() => Array.from(document.querySelectorAll('button')).filter(b => b.offsetParent).slice(0, 40).map(b => (b.getAttribute('title') || b.getAttribute('aria-label') || b.getAttribute('data-tooltip') || '') + ' ~ ' + ((b.querySelector('i,svg') || {}).className || {}).baseVal || ((b.querySelector('i,svg') || {}).className || '') + ' ~ ' + b.innerText.trim().slice(0, 20))).catch(() => [])); note('Boutons : ' + inv.join(' || ')); } catch (e) {}
 
-    /* 3. Export Excel (icône Excel de la barre d'outils) */
-    const exp = await premier(page, ['button:has([class*="file-excel" i])', 'button:has([class*="excel" i])', '[title*="Excel" i]', '[aria-label*="Excel" i]', '[title*="xport" i]', '[aria-label*="xport" i]', '[data-tooltip*="xport" i]', 'button:has-text("Exporter")', 'button:has-text("Export")', 'button:has([class*="fa-file-export" i])', 'button:has([class*="table" i])'], 30000);
-    note('Bouton export : ' + exp._repere);
+    /* 3. Export Excel — l'icône Excel n'a ni texte ni info-bulle : inventaire de la barre d'outils, puis choix par icône ou par position (2e bouton de la 2e rangée). */
+    let barre = [];
+    for (const fr of page.frames()) barre = barre.concat(await fr.evaluate(() => Array.from(document.querySelectorAll('button, a, [role="button"], .btn')).map(e => { const r = e.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), html: e.outerHTML.replace(/\s+/g, ' ').slice(0, 220) }; }).filter(o => o.w >= 24 && o.h >= 24 && o.w <= 90 && o.y > 60 && o.y < 240 && o.x > 400 && o.x < 1000)).catch(() => []));
+    barre.sort((p, q) => (p.y - q.y) || (p.x - q.x));
+    note('Barre d\'outils (' + barre.length + ') : ' + barre.map(o => o.x + ',' + o.y + ' ' + o.html.replace(/"/g, "'")).join(' || '));
+    let cible = barre.find(o => /excel|xls|file-export|export/i.test(o.html));
+    if (!cible && barre.length) {
+      const rangs = []; barre.forEach(o => { const r = rangs.find(g => Math.abs(g.y - o.y) < 12); if (r) r.items.push(o); else rangs.push({ y: o.y, items: [o] }); });
+      const r2 = rangs.find(g => g.items.length >= 4) || rangs[rangs.length - 1];
+      cible = r2 && (r2.items[1] || r2.items[0]);
+      note('Bouton Excel choisi par position : ' + (cible ? cible.x + ',' + cible.y : 'aucun'));
+    } else if (cible) note('Bouton Excel reconnu : ' + cible.html.slice(0, 120));
+    if (!cible) throw new Error('Barre d\'outils introuvable — voir journal "Barre d\'outils"');
     const [dl] = await Promise.all([
       page.waitForEvent('download', { timeout: 180000 }),
-      exp.click().then(async () => {
-        for (let n = 0; n < 6; n++) {
-          await page.waitForTimeout(1500);
+      page.mouse.click(cible.x + cible.w / 2, cible.y + cible.h / 2).then(async () => {
+        for (let n = 0; n < 8; n++) {
+          await page.waitForTimeout(2000);
           await page.screenshot({ path: path.join(CAP, '07-export-' + n + '.png') }).catch(() => {});
-          const x = await bouton(page, 'button:has-text("Exporter"), button:has-text("Export"), button:has-text("Valider"), button:has-text("Télécharger"), button:has-text("OK"), button:has-text("Confirmer"), text=/Excel|xlsx/i');
+          note('Après clic export ' + n + ' : ' + await texte());
+          const x = await bouton(page, 'button:has-text("Exporter"), button:has-text("Export"), button:has-text("Valider"), button:has-text("Télécharger"), button:has-text("OK"), button:has-text("Confirmer"), button:has-text("Oui"), a:has-text("Exporter"), text=/Excel|xlsx/i');
           if (x) { note('Confirmation export : ' + (await x.innerText().catch(() => '?'))); await x.click().catch(() => {}); } else break;
         }
       })
