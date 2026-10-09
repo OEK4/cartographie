@@ -13,9 +13,9 @@ const DL = path.join(__dirname, 'dl'); fs.mkdirSync(DL, { recursive: true });
 async function premier(page, sels, t = 15000) {
   const fin = Date.now() + t;
   while (Date.now() < fin) {
-    for (const fr of page.frames()) for (const s of sels) {
+    for (const s of sels) for (const fr of page.frames()) {
       const l = fr.locator(s).first();
-      if (await l.count().catch(() => 0) && await l.isVisible().catch(() => false)) return l;
+      if (await l.count().catch(() => 0) && await l.isVisible().catch(() => false)) { l._repere = s; return l; }
     }
     await page.waitForTimeout(300);
   }
@@ -34,25 +34,25 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ acceptDownloads: true, locale: 'fr-FR', viewport: { width: 1600, height: 1000 } });
   const page = await ctx.newPage();
-  /* Adresse sans paramètres (pas de jeton dans le journal) */
   const ou = () => { try { const u = new URL(page.url()); return u.host + u.pathname + u.hash.slice(0, 40); } catch (e) { return '?'; } };
   const texte = async () => { let s = ''; for (const fr of page.frames()) s += ' ' + (await fr.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '')); return s.replace(/\s+/g, ' ').slice(0, 400); };
   const attendreLoader = async (t = 60000) => { const fin = Date.now() + t; while (Date.now() < fin) { let vis = false; for (const fr of page.frames()) for (const e of await fr.locator('text=/Veuillez patienter|Please wait/i').all().catch(() => [])) if (await e.isVisible().catch(() => false)) { vis = true; break; } if (!vis) return; await page.waitForTimeout(300); } };
   try {
-    /* 1. Connexion — Kairnial affiche un écran "Veuillez patienter" puis la page de connexion.
-       Le champ mot de passe peut n'apparaître qu'après la saisie de l'identifiant : on tape lentement, on attend, puis on clique "Connexion" si besoin. */
+    /* 1. Connexion */
     await page.goto(KURL, { waitUntil: 'domcontentloaded' });
     await attendreLoader();
-    const SEL_USER = ['#username', 'input[name="username"]', 'input[placeholder*="Identifiant" i]', 'input[type="email"]', 'input[name*="login" i]', 'input[name*="user" i]', 'input[type="text"]'];
+    const SEL_USER = ['input[placeholder*="Identifiant" i]', '#username', 'input[name="username"]', 'input[type="email"]', 'input[name*="login" i]', 'input[name*="user" i]', 'input[placeholder*="mail" i]', 'form input[type="text"]'];
     const SEL_PWD = ['#password', 'input[name="password"]', 'input[type="password"]'];
     const user = await premier(page, SEL_USER, 60000);
     await attendreLoader(); await page.waitForTimeout(1500);
-    note('Page de connexion : ' + ou() + ' | ' + await texte());
+    note('Page de connexion : ' + ou() + ' | champ identifiant = ' + user._repere + ' | ' + await texte());
     await page.screenshot({ path: path.join(CAP, '01-login.png') });
     await user.click({ timeout: 15000 }).catch(() => {});
     await user.pressSequentially(LOGIN, { delay: 60 }).catch(async () => { await user.fill(LOGIN, { force: true }); });
     await page.waitForTimeout(2500);
     note('Identifiant saisi : ' + ((await user.inputValue().catch(() => '')) ? 'ok' : 'CHAMP VIDE'));
+    await user.press('Tab').catch(() => {});
+    await page.waitForTimeout(1500);
     await page.screenshot({ path: path.join(CAP, '02-identifiant-saisi.png') });
     let pwd = await premier(page, SEL_PWD, 8000).catch(() => null);
     if (!pwd) {
@@ -80,18 +80,41 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     if (await bouton(page, 'input[type="password"]')) throw new Error('Connexion refusée (identifiant ou mot de passe) — voir 04-apres-connexion.png');
     if (!/rfiles/.test(page.url())) { await page.goto(KURL, { waitUntil: 'domcontentloaded' }); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(4000); }
 
-    /* 2. Projet HMIMV puis liste des fichiers (si l'URL n'y mène pas déjà) */
+    /* 2. Projet HMIMV puis Documents */
     await page.screenshot({ path: path.join(CAP, '05-accueil.png') });
-    if (PROJET) { const p = await bouton(page, 'text=' + PROJET); if (p) { await p.click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2000); } }
-    if (!/rfiles/.test(page.url())) { const docs = await bouton(page, 'a:has-text("Documents"), a:has-text("Fichiers"), text=Documents, [href*="rfiles"]'); if (docs) { await docs.click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2000); } }
+    if (PROJET) {
+      const p = await bouton(page, 'text=' + PROJET);
+      if (p) {
+        note('Projet trouvé : ' + PROJET);
+        await p.click(); await page.waitForTimeout(2500);
+        if (await bouton(page, 'input[placeholder*="Rechercher" i]')) { const p2 = await bouton(page, 'text=' + PROJET); if (p2) await p2.dblclick().catch(() => {}); }
+        await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(4000);
+        note('Après choix du projet : ' + ou() + ' | ' + await texte());
+      } else note('Projet "' + PROJET + '" non trouvé à l\'écran — on continue');
+    }
+    if (!(await bouton(page, 'input[placeholder*="Recherche" i]'))) {
+      const docs = await bouton(page, 'a:has-text("Documents"), [role="menuitem"]:has-text("Documents"), li:has-text("Documents"), text=Documents');
+      if (docs) { note('Clic sur Documents'); await docs.click(); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); }
+    }
+    await premier(page, ['input[placeholder*="Recherche" i]', 'text=Derniers items'], 60000).catch(() => {});
+    await page.waitForTimeout(3000);
     note('Liste des documents : ' + ou() + ' | ' + await texte());
     await page.screenshot({ path: path.join(CAP, '06-documents.png') });
+    try { let inv = []; for (const fr of page.frames()) inv = inv.concat(await fr.evaluate(() => Array.from(document.querySelectorAll('button')).filter(b => b.offsetParent).slice(0, 40).map(b => (b.getAttribute('title') || b.getAttribute('aria-label') || b.getAttribute('data-tooltip') || '') + ' ~ ' + ((b.querySelector('i,svg') || {}).className || {}).baseVal || ((b.querySelector('i,svg') || {}).className || '') + ' ~ ' + b.innerText.trim().slice(0, 20))).catch(() => [])); note('Boutons : ' + inv.join(' || ')); } catch (e) {}
 
-    /* 3. Export Excel */
-    const exp = await premier(page, ['button:has-text("Exporter")', 'button:has-text("Export")', '[title*="Export" i]', '[aria-label*="Export" i]', 'text=/^Export/i'], 30000);
+    /* 3. Export Excel (icône Excel de la barre d'outils) */
+    const exp = await premier(page, ['button:has([class*="file-excel" i])', 'button:has([class*="excel" i])', '[title*="Excel" i]', '[aria-label*="Excel" i]', '[title*="xport" i]', '[aria-label*="xport" i]', '[data-tooltip*="xport" i]', 'button:has-text("Exporter")', 'button:has-text("Export")', 'button:has([class*="fa-file-export" i])', 'button:has([class*="table" i])'], 30000);
+    note('Bouton export : ' + exp._repere);
     const [dl] = await Promise.all([
-      page.waitForEvent('download', { timeout: 120000 }),
-      exp.click().then(async () => { await page.waitForTimeout(800); const x = await bouton(page, 'text=/Excel|xlsx|CSV/i'); if (x) await x.click().catch(() => {}); })
+      page.waitForEvent('download', { timeout: 180000 }),
+      exp.click().then(async () => {
+        for (let n = 0; n < 6; n++) {
+          await page.waitForTimeout(1500);
+          await page.screenshot({ path: path.join(CAP, '07-export-' + n + '.png') }).catch(() => {});
+          const x = await bouton(page, 'button:has-text("Exporter"), button:has-text("Export"), button:has-text("Valider"), button:has-text("Télécharger"), button:has-text("OK"), button:has-text("Confirmer"), text=/Excel|xlsx/i');
+          if (x) { note('Confirmation export : ' + (await x.innerText().catch(() => '?'))); await x.click().catch(() => {}); } else break;
+        }
+      })
     ]);
     const file = path.join(DL, dl.suggestedFilename() || 'export.xlsx');
     await dl.saveAs(file);
