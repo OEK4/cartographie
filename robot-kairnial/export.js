@@ -4,19 +4,27 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 
-const URL = process.env.KAIRNIAL_URL, LOGIN = process.env.KAIRNIAL_LOGIN, PASS = process.env.KAIRNIAL_PASSWORD, PROJET = process.env.KAIRNIAL_PROJET || '';
-if (!URL || !LOGIN || !PASS) { console.error('Secrets KAIRNIAL_URL / KAIRNIAL_LOGIN / KAIRNIAL_PASSWORD manquants'); process.exit(1); }
+const KURL = process.env.KAIRNIAL_URL, LOGIN = process.env.KAIRNIAL_LOGIN, PASS = process.env.KAIRNIAL_PASSWORD, PROJET = process.env.KAIRNIAL_PROJET || '';
+if (!KURL || !LOGIN || !PASS) { console.error('Secrets KAIRNIAL_URL / KAIRNIAL_LOGIN / KAIRNIAL_PASSWORD manquants'); process.exit(1); }
 const CAP = path.join(__dirname, 'captures'); fs.mkdirSync(CAP, { recursive: true });
 const DL = path.join(__dirname, 'dl'); fs.mkdirSync(DL, { recursive: true });
 
-/* Premier élément présent parmi plusieurs repères possibles. */
+/* Premier élément visible parmi plusieurs repères, cherché dans la page ET dans tous ses cadres (le formulaire Kairnial est dans une iframe). */
 async function premier(page, sels, t = 15000) {
   const fin = Date.now() + t;
   while (Date.now() < fin) {
-    for (const s of sels) { const l = page.locator(s).first(); if (await l.count() && await l.isVisible().catch(() => false)) return l; }
+    for (const fr of page.frames()) for (const s of sels) {
+      const l = fr.locator(s).first();
+      if (await l.count().catch(() => 0) && await l.isVisible().catch(() => false)) return l;
+    }
     await page.waitForTimeout(300);
   }
   throw new Error('Repère introuvable : ' + sels.join(' | '));
+}
+/* Premier bouton visible, tous cadres confondus ; sinon null. */
+async function bouton(page, sel) {
+  for (const fr of page.frames()) { const l = fr.locator(sel).first(); if (await l.count().catch(() => 0) && await l.isVisible().catch(() => false)) return l; }
+  return null;
 }
 
 const journal = [];
@@ -28,12 +36,12 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
   const page = await ctx.newPage();
   /* Adresse sans paramètres (pas de jeton dans le journal) */
   const ou = () => { try { const u = new URL(page.url()); return u.host + u.pathname + u.hash.slice(0, 40); } catch (e) { return '?'; } };
-  const texte = async () => (await page.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
-  const attendreLoader = async (t = 60000) => { const fin = Date.now() + t; while (Date.now() < fin) { let vis = false; for (const e of await page.locator('text=/Veuillez patienter|Please wait/i').all()) if (await e.isVisible().catch(() => false)) { vis = true; break; } if (!vis) return; await page.waitForTimeout(300); } };
+  const texte = async () => { let s = ''; for (const fr of page.frames()) s += ' ' + (await fr.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '')); return s.replace(/\s+/g, ' ').slice(0, 400); };
+  const attendreLoader = async (t = 60000) => { const fin = Date.now() + t; while (Date.now() < fin) { let vis = false; for (const fr of page.frames()) for (const e of await fr.locator('text=/Veuillez patienter|Please wait/i').all().catch(() => [])) if (await e.isVisible().catch(() => false)) { vis = true; break; } if (!vis) return; await page.waitForTimeout(300); } };
   try {
     /* 1. Connexion — Kairnial affiche un écran "Veuillez patienter" puis la page de connexion.
        Le champ mot de passe peut n'apparaître qu'après la saisie de l'identifiant : on tape lentement, on attend, puis on clique "Connexion" si besoin. */
-    await page.goto(URL, { waitUntil: 'domcontentloaded' });
+    await page.goto(KURL, { waitUntil: 'domcontentloaded' });
     await attendreLoader();
     const SEL_USER = ['#username', 'input[name="username"]', 'input[placeholder*="Identifiant" i]', 'input[type="email"]', 'input[name*="login" i]', 'input[name*="user" i]', 'input[type="text"]'];
     const SEL_PWD = ['#password', 'input[name="password"]', 'input[type="password"]'];
@@ -48,34 +56,34 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     await page.screenshot({ path: path.join(CAP, '02-identifiant-saisi.png') });
     let pwd = await premier(page, SEL_PWD, 8000).catch(() => null);
     if (!pwd) {
-      const btn1 = page.locator('#kc-login, button:has-text("Connexion"), input[type="submit"], button[type="submit"], button:has-text("Login"), button:has-text("Suivant"), button:has-text("Continuer")').first();
-      if (await btn1.isVisible().catch(() => false)) await btn1.click({ timeout: 10000 }).catch(() => page.keyboard.press('Enter')); else await page.keyboard.press('Enter');
+      const btn1 = await bouton(page, '#kc-login, button:has-text("Connexion"), input[type="submit"], button[type="submit"], button:has-text("Login"), button:has-text("Suivant"), button:has-text("Continuer")');
+      if (btn1) await btn1.click({ timeout: 10000 }).catch(() => user.press('Enter')); else await user.press('Enter');
       note('Bouton Connexion cliqué, attente du champ mot de passe');
       for (let n = 1; n <= 10 && !pwd; n++) {
         await page.waitForTimeout(3000);
         await page.screenshot({ path: path.join(CAP, '03-attente-' + String(n).padStart(2, '0') + '.png') }).catch(() => {});
         note('attente ' + n + ' : ' + ou() + ' | ' + await texte());
         pwd = await premier(page, SEL_PWD, 500).catch(() => null);
-        if (!pwd && n >= 4) { const u2 = await premier(page, SEL_USER, 500).catch(() => null); if (u2 && !(await u2.inputValue().catch(() => ''))) { note('Retour à la page de connexion, nouvelle saisie de l\'identifiant'); await u2.click().catch(() => {}); await u2.pressSequentially(LOGIN, { delay: 80 }).catch(() => {}); await page.waitForTimeout(4000); pwd = await premier(page, SEL_PWD, 500).catch(() => null); if (!pwd) await page.keyboard.press('Enter'); } }
+        if (!pwd && n >= 4) { const u2 = await premier(page, SEL_USER, 500).catch(() => null); if (u2 && !(await u2.inputValue().catch(() => ''))) { note('Retour à la page de connexion, nouvelle saisie de l\'identifiant'); await u2.click().catch(() => {}); await u2.pressSequentially(LOGIN, { delay: 80 }).catch(() => {}); await page.waitForTimeout(4000); pwd = await premier(page, SEL_PWD, 500).catch(() => null); if (!pwd) await u2.press('Enter'); } }
       }
     }
     if (!pwd) throw new Error('Champ mot de passe jamais apparu — voir journal.txt et captures 03-*');
     await pwd.click({ timeout: 15000 }).catch(() => {});
     await pwd.pressSequentially(PASS, { delay: 50 }).catch(async () => { await pwd.fill(PASS, { force: true }); });
     await page.waitForTimeout(800);
-    const btn2 = page.locator('#kc-login, button:has-text("Connexion"), input[type="submit"], button[type="submit"], button:has-text("Login"), button:has-text("Se connecter")').first();
-    if (await btn2.isVisible().catch(() => false)) await btn2.click({ timeout: 10000 }).catch(() => page.keyboard.press('Enter')); else await page.keyboard.press('Enter');
+    const btn2 = await bouton(page, '#kc-login, button:has-text("Connexion"), input[type="submit"], button[type="submit"], button:has-text("Login"), button:has-text("Se connecter")');
+    if (btn2) await btn2.click({ timeout: 10000 }).catch(() => pwd.press('Enter')); else await pwd.press('Enter');
     await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {});
     await attendreLoader(); await page.waitForTimeout(4000);
     note('Après connexion : ' + ou() + ' | ' + await texte());
     await page.screenshot({ path: path.join(CAP, '04-apres-connexion.png') });
-    if (await page.locator('input[type="password"]').first().isVisible().catch(() => false)) throw new Error('Connexion refusée (identifiant ou mot de passe) — voir 04-apres-connexion.png');
-    if (!/rfiles/.test(page.url())) { await page.goto(URL, { waitUntil: 'domcontentloaded' }); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(4000); }
+    if (await bouton(page, 'input[type="password"]')) throw new Error('Connexion refusée (identifiant ou mot de passe) — voir 04-apres-connexion.png');
+    if (!/rfiles/.test(page.url())) { await page.goto(KURL, { waitUntil: 'domcontentloaded' }); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(4000); }
 
     /* 2. Projet HMIMV puis liste des fichiers (si l'URL n'y mène pas déjà) */
     await page.screenshot({ path: path.join(CAP, '05-accueil.png') });
-    if (PROJET) { const p = page.locator('text=' + PROJET).first(); if (await p.isVisible().catch(() => false)) { await p.click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2000); } }
-    if (!/rfiles/.test(page.url())) { const docs = page.locator('a:has-text("Documents"), a:has-text("Fichiers"), text=Documents, [href*="rfiles"]').first(); if (await docs.isVisible().catch(() => false)) { await docs.click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2000); } }
+    if (PROJET) { const p = await bouton(page, 'text=' + PROJET); if (p) { await p.click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2000); } }
+    if (!/rfiles/.test(page.url())) { const docs = await bouton(page, 'a:has-text("Documents"), a:has-text("Fichiers"), text=Documents, [href*="rfiles"]'); if (docs) { await docs.click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2000); } }
     note('Liste des documents : ' + ou() + ' | ' + await texte());
     await page.screenshot({ path: path.join(CAP, '06-documents.png') });
 
@@ -83,7 +91,7 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     const exp = await premier(page, ['button:has-text("Exporter")', 'button:has-text("Export")', '[title*="Export" i]', '[aria-label*="Export" i]', 'text=/^Export/i'], 30000);
     const [dl] = await Promise.all([
       page.waitForEvent('download', { timeout: 120000 }),
-      exp.click().then(async () => { const x = page.locator('text=/Excel|xlsx|CSV/i').first(); if (await x.count()) await x.click().catch(() => {}); })
+      exp.click().then(async () => { await page.waitForTimeout(800); const x = await bouton(page, 'text=/Excel|xlsx|CSV/i'); if (x) await x.click().catch(() => {}); })
     ]);
     const file = path.join(DL, dl.suggestedFilename() || 'export.xlsx');
     await dl.saveAs(file);
