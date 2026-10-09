@@ -1,5 +1,4 @@
-/* Robot Kairnial — se connecte avec VOTRE login (secrets GitHub), exporte la liste des documents, écrit kairnial.json.
-   Les repères de page (sélecteurs) sont des hypothèses : à ajuster après le premier essai avec les captures d'écran. */
+/* Robot Kairnial — se connecte avec VOTRE login (secrets GitHub), exporte la liste des documents, écrit kairnial.json. */
 const { chromium } = require('playwright');
 const XLSX = require('xlsx');
 const fs = require('fs');
@@ -27,26 +26,33 @@ async function premier(page, sels, t = 15000) {
   try {
     /* 1. Connexion */
     await page.goto(URL, { waitUntil: 'domcontentloaded' });
+    /* Kairnial : 1) identifiant seul + bouton "Connexion"  2) page du mot de passe */
+    const user = await premier(page, ['input[placeholder*="Identifiant" i]', 'input[type="email"]', 'input[name*="login" i]', 'input[name*="user" i]', 'input[name*="mail" i]', 'input[type="text"]'], 45000);
     await page.screenshot({ path: path.join(CAP, '01-login.png') });
-    const user = await premier(page, ['input[type="email"]', 'input[name*="login" i]', 'input[name*="user" i]', 'input[name*="mail" i]', 'input[type="text"]']);
-    await user.fill(LOGIN);
-    const nextBtn = page.locator('button:has-text("Suivant"), button:has-text("Next"), button:has-text("Continuer")').first();
-    if (await nextBtn.count()) await nextBtn.click().catch(() => {});
-    const pwd = await premier(page, ['input[type="password"]']);
-    await pwd.fill(PASS);
-    await pwd.press('Enter');
-    await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-    await page.screenshot({ path: path.join(CAP, '02-apres-connexion.png') });
-    if (await page.locator('input[type="password"]').count()) throw new Error('Connexion refusée (identifiants ?)');
+    await user.click(); await user.fill(LOGIN);
+    const btn1 = page.locator('button:has-text("Connexion"), button:has-text("Login"), button:has-text("Suivant"), button:has-text("Continuer"), button[type="submit"]').first();
+    if (await btn1.count()) await btn1.click().catch(() => {}); else await user.press('Enter');
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: path.join(CAP, '02-apres-identifiant.png') });
+    const pwd = await premier(page, ['input[type="password"]'], 45000);
+    await pwd.click(); await pwd.fill(PASS);
+    const btn2 = page.locator('button:has-text("Connexion"), button:has-text("Login"), button:has-text("Se connecter"), button[type="submit"]').first();
+    if (await btn2.count()) await btn2.click().catch(() => {}); else await pwd.press('Enter');
+    await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {});
+    await page.waitForTimeout(3000);
+    await page.screenshot({ path: path.join(CAP, '03-apres-connexion.png') });
+    if (await page.locator('input[type="password"]').isVisible().catch(() => false)) throw new Error('Connexion refusée (identifiant ou mot de passe)');
+    /* Revenir sur la liste des fichiers si Kairnial a atterri ailleurs */
+    if (!/rfiles/.test(page.url())) { await page.goto(URL, { waitUntil: 'domcontentloaded' }); await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {}); await page.waitForTimeout(3000); }
 
-    /* 2. Projet HMIMV puis module Documents */
-    if (PROJET) { const p = await premier(page, ['text=' + PROJET, 'a:has-text("' + PROJET + '")'], 20000); await p.click(); await page.waitForLoadState('networkidle').catch(() => {}); }
-    const docs = await premier(page, ['a:has-text("Documents")', 'text=Documents', '[href*="document" i]'], 20000);
-    await docs.click(); await page.waitForLoadState('networkidle').catch(() => {});
-    await page.screenshot({ path: path.join(CAP, '03-documents.png') });
+    /* 2. Projet HMIMV puis liste des fichiers (si l'URL n'y mène pas déjà) */
+    await page.screenshot({ path: path.join(CAP, '04-accueil.png') });
+    if (PROJET) { const p = page.locator('text=' + PROJET).first(); if (await p.isVisible().catch(() => false)) { await p.click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2000); } }
+    if (!/rfiles/.test(page.url())) { const docs = page.locator('a:has-text("Documents"), a:has-text("Fichiers"), text=Documents, [href*="rfiles"]').first(); if (await docs.isVisible().catch(() => false)) { await docs.click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2000); } }
+    await page.screenshot({ path: path.join(CAP, '05-documents.png') });
 
     /* 3. Export Excel */
-    const exp = await premier(page, ['button:has-text("Exporter")', 'button:has-text("Export")', '[title*="Export" i]', '[aria-label*="Export" i]'], 20000);
+    const exp = await premier(page, ['button:has-text("Exporter")', 'button:has-text("Export")', '[title*="Export" i]', '[aria-label*="Export" i]', 'text=/^Export/i'], 30000);
     const [dl] = await Promise.all([
       page.waitForEvent('download', { timeout: 120000 }),
       exp.click().then(async () => { const x = page.locator('text=/Excel|xlsx|CSV/i').first(); if (await x.count()) await x.click().catch(() => {}); })
