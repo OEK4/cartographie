@@ -2,8 +2,8 @@ name: Kairnial → kairnial.json
 
 on:
   schedule:
-    - cron: "0 * * * *"
-  workflow_dispatch:
+    - cron: "0 * * * *"      # toutes les heures (UTC). Passer à "*/15 * * * *" pour 15 min.
+  workflow_dispatch:         # bouton "Run workflow" pour lancer à la main
 
 permissions:
   contents: write
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   export:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -46,10 +46,10 @@ jobs:
           git commit -m "Kairnial : états des documents $(date -u +'%Y-%m-%d %H:%M UTC')"
           git push
 
-      - name: Garder une trace en cas d'échec
-        if: failure()
+      - name: Garder les captures et le journal
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: captures-echec
+          name: captures
           path: robot-kairnial/captures/
           retention-days: 3
