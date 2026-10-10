@@ -240,16 +240,20 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
       const norm = lab => { lab = String(lab || '').toUpperCase(); return /^FAV|VSO|^VAL$|APPROUV/.test(lab) ? 'VSO' : /VAB|REF|DEFAV|REJ/.test(lab) ? 'REF' : /VAO|OBS/.test(lab) ? 'VAO' : /^NC|ANN|PI$|INFO/.test(lab) ? 'NC' : 'ATT'; };
       const out = [];
       for (const f of viaApi.fichiers) {
-        const nom = String(f.entete_nom || ''); if (!/^HMIMV-/i.test(nom)) continue;
-        const brut = nom.replace(/\.[a-z0-9]{2,5}$/i, ''), code = brut.split('_')[0].trim(), p = code.split('-');
+        const nom = String(f.entete_nom || f.entete_oldName || ''); if (!nom) continue;
+        const nomenclature = /^HMIMV-/i.test(nom);
+        const brut = nom.replace(/\.[a-z0-9]{2,5}$/i, ''), code = nomenclature ? brut.split('_')[0].trim() : brut, p = nomenclature ? code.split('-') : [];
+        const cheminF = String(f.fcat_chemin || ''); const phaseM = cheminF.match(/0[0-4]\s*-?\s*(R[ÉE]F[ÉE]RENCE|MARCH[ÉE]|APS|APD|EXE)/i);
+        const phaseDossier = phaseM ? phaseM[1].toUpperCase().replace(/[ÉE]/g, 'E').replace('REFERENCE', 'REF') : '';
         const circ = circuits[String(f.circuit)] || {}; const vs = viaApi.visas[f.item_id] || {};
         const visas = Object.keys(vs).map(k => { const v = vs[k], st = circ[k] || {}, lab = st.label || ('Étape ' + k); const s = String(v.sub); const sv = s === '-1' ? null : (st.subs || []).find(x => String(x.index) === s); const avis = s === '-1' ? 'ATT' : sv ? norm(sv.label) : 'ATT'; return { etape: +k, k: (lab.match(/^\d{2}-([A-Z]{2,5})/) || lab.match(/^([A-Z]{2,5})\b/) || ['', 'V' + k])[1], lab, lot: /^Lot \d+/.test(lab), avis, code: sv ? sv.label : (s === '-1' ? 'ATT' : s), libelle: sv ? sv.LongDesc : (s === '-1' ? 'En attente de visa' : ''), date: v.date ? new Date(+v.date * 1000).toISOString() : '', par: v.par, commentaire: v.com, titre: v.titre, chrono: v.chrono }; }).sort((a, b) => a.etape - b.etape);
         const inter = visas.filter(v => !v.lot); const lotStep = visas.find(v => v.lot);
         const etat = inter.some(v => v.avis === 'REF') ? 'REF' : inter.some(v => v.avis === 'ATT') ? 'ATT' : inter.some(v => v.avis === 'VAO') ? 'VAO' : inter.some(v => v.avis === 'VSO') ? 'VSO' : 'ATT';
-        const chemin = String(f.fcat_chemin || ''); const lotM = chemin.match(/Lot (\d+)\s*-\s*([^/]+)/i);
-        out.push({ code, titre: String(f.files_desc || f.entete_oldName || brut).replace(/\.[a-z0-9]{2,5}$/i, ''), phase: (p[1] || '').toUpperCase(), lot: p[3] || (lotM ? lotM[1] : ''), lotLab: lotStep ? lotStep.lab : (lotM ? 'Lot ' + lotM[1] + ' - ' + lotM[2].trim() : ''), dossier: chemin, type: p[4] || '', bat: (p[5] || '').toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(p[9] || '00').padStart(2, '0'), emetteur: String(f.createby || ''), email: String(f.user_email || ''), date: f.files_date ? new Date(+f.files_date * 1000).toISOString() : '', depot: lotStep && lotStep.date ? lotStep.date : '', taille: +f.files_size || 0, revisions: +f.files_nbrev || 1, archive: f.entete_archive === '1', circuit: nomsCircuits[String(f.circuit)] || String(f.circuit || ''), etat, visas });
+        const chemin = cheminF; const lotM = chemin.match(/Lot (\d+)\s*-\s*([^/]+)/i);
+        out.push({ code, titre: String(f.files_desc || f.entete_oldName || brut).replace(/\.[a-z0-9]{2,5}$/i, ''), nomenclature, phase: (p[1] || phaseDossier || '').toUpperCase(), lot: p[3] || (lotM ? lotM[1] : ''), lotLab: lotStep ? lotStep.lab : (lotM ? 'Lot ' + lotM[1] + ' - ' + lotM[2].trim() : ''), dossier: chemin, type: p[4] || (nomenclature ? '' : 'AUT'), bat: (p[5] || (nomenclature ? '' : 'AUT')).toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(p[9] || '00').padStart(2, '0'), emetteur: String(f.createby || ''), email: String(f.user_email || ''), date: f.files_date ? new Date(+f.files_date * 1000).toISOString() : '', depot: lotStep && lotStep.date ? lotStep.date : '', taille: +f.files_size || 0, revisions: +f.files_nbrev || 1, archive: f.entete_archive === '1', circuit: nomsCircuits[String(f.circuit)] || String(f.circuit || ''), etat, visas });
       }
-      if (!out.length) throw new Error('Service de données : aucun code HMIMV reconnu');
+      if (!out.length) throw new Error('Service de données : aucun fichier');
+      note('Dont hors nomenclature HMIMV : ' + out.filter(d => !d.nomenclature).length);
       fs.writeFileSync(path.join(__dirname, '..', 'kairnial.json'), JSON.stringify({ ok: true, date: new Date().toISOString(), total: viaApi.total || total || out.length, source: 'service', docs: out }));
       note('kairnial.json écrit depuis le service : ' + out.length + ' documents');
       console.log(out.length + ' documents (service de données)');
