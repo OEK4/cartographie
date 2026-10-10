@@ -192,27 +192,29 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
       note('Cookies : ' + cookies.map(c => c.name).join(', ') + (ck ? ' | jeton CSRF trouvé dans ' + ck.name : ' | aucun cookie CSRF'));
       for (let skip = 0; skip < 20000; skip += TAKE) {
         P.LIMITSKIP = skip; P.LIMITTAKE = TAKE; P.microtime = Date.now();
+        const ckNow = (await ctx.cookies()).find(c => /xsrf|csrf/i.test(c.name));
         const res = await page.evaluate(async ({ url, hdr, body, cookieTok }) => {
           const m = document.cookie.match(/(?:^|;\s*)(XSRF-TOKEN|csrf_token|_csrf|XSRF_TOKEN)=([^;]+)/i);
-          const tok = m ? decodeURIComponent(m[2]) : (cookieTok || null);
+          const tok = cookieTok || (m ? decodeURIComponent(m[2]) : null);
           if (tok) { body.headers['X-XSRF-TOKEN'] = tok; if (hdr['x-xsrf-token'] !== undefined) hdr['x-xsrf-token'] = tok; }
           let r, t; try { r = await fetch(url, { method: 'POST', headers: hdr, body: JSON.stringify(body), credentials: 'include' }); t = await r.text(); } catch (e) { return { status: 0, err: String(e), tok: tok ? 'oui' : 'non' }; }
           if (r.status !== 200) return { status: r.status, err: t.slice(0, 300), tok: tok ? 'oui' : 'non' };
           let o; try { o = JSON.parse(t); } catch (e) { return { status: 0, err: 'JSON invalide', tok: tok ? 'oui' : 'non' }; } const F = o.fichiers || []; const V = o.visas || {}; const vu = {};
           for (const id in V) { const s = {}; for (const k in V[id]) { const v = V[id][k]; if (String(v.fv_subvisa) !== '-2') s[k] = v; } vu[id] = s; }
           return { status: 200, total: o.total, n: F.length, data: { fichiers: F, visas: vu, total: o.total } };
-        }, { url: dernier.url, hdr, body, cookieTok: ck ? ck.value : null });
+        }, { url: dernier.url, hdr, body, cookieTok: ckNow ? ckNow.value : (ck ? ck.value : null) });
         if (res.status !== 200) { note('Tranche ' + skip + ' : HTTP ' + res.status + ' ' + (res.err || '') + ' (jeton page : ' + res.tok + ')'); break; }
         ok = true; const n = reduire(res.data);
         if (skip === 0 || (skip / TAKE) % 10 === 0) note('Tranche ' + skip + ' : ' + n + ' fichiers (total annoncé ' + res.total + ')');
         if (n < TAKE || (totalService && collecte.size >= totalService)) break;
       }
     } catch (e) { note('Service de données : ' + e.message); }
-    if (!ok) {
+    if (!ok || (totalService && collecte.size < totalService)) {
       try {
         /* Repli : parcourir les pages à l'écran ; chaque page déclenche un appel getFilesFromCat que l'on réduit au vol */
         note('Repli : pagination à l\'écran sur ' + nbPages + ' pages');
-        for (let pg = 2; pg <= nbPages && pg <= 400; pg++) {
+        const debutPg = Math.max(2, Math.floor(collecte.size / parPage) + 1);
+        for (let pg = debutPg; pg <= nbPages && pg <= 400; pg++) {
           const avant = collecte.size; let clique = false;
           for (const fr of page.frames()) {
             const cand = fr.locator('a, li, span, button').filter({ hasText: new RegExp('^\\s*' + pg + '\\s*$') });
