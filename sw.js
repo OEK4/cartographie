@@ -1,9 +1,11 @@
-const CACHE = 'hmimv-v4';
+const CACHE = 'hmimv-v6';
 const BASE = [
   './',
   './index.html',
   './Saisie terrain - NHM.html',
   './Vue 3D.html',
+  './Documents Kairnial.html',
+  './nhm-nav.js',
   './manifest.webmanifest',
   './icone-192.png',
   './icone-512.png'
