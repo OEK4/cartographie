@@ -2,8 +2,8 @@ name: Kairnial → kairnial.json
 
 on:
   schedule:
-    - cron: "0 * * * *"
-  workflow_dispatch:
+    - cron: '*/15 * * * *'      # toutes les 15 minutes (UTC)
+  workflow_dispatch:         # bouton "Run workflow" pour lancer à la main
 
 permissions:
   contents: write
