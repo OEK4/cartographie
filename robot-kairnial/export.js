@@ -41,9 +41,9 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
   let page = await ctx.newPage();
   /* Si Kairnial ouvre un module dans un nouvel onglet, on bascule dessus */
   /* Écoute des réponses du serveur : la liste des documents arrive en JSON — on garde celles qui contiennent des codes HMIMV */
-  const api = []; let nApi = 0; const appels = []; const defs = [];
+  const api = []; let nApi = 0; const appels = []; const defs = []; let circuitsDef = null;
   ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (/image|font|css|javascript|octet/i.test(ct)) return; const t = await rep.text(); if (!/HMIMV-/.test(t)) return; const u = rep.url(); const req = rep.request(); const postFull = req.postData() || ''; const post = postFull.slice(0, 300); if (/getFilesFromCat/.test(u)) appels.push({ url: u, post: postFull, text: t, headers: req.headers() }); api.push({ url: u.replace(/\?.*/, '').slice(0, 160), ct: ct.slice(0, 40), method: req.method(), post, taille: t.length, nb: (t.match(/HMIMV-/g) || []).length }); if (nApi < 3) { nApi++; fs.writeFileSync(path.join(CAP, 'api-' + nApi + '.json'), t.slice(0, 400000)); } } catch (e) {} });
-  ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (!/json/i.test(ct)) return; const t = await rep.text(); if (/SOCOTEC|Bureau Contr/i.test(t) && !/getFilesFromCat/.test(rep.url()) && defs.length < 4) { defs.push({ url: rep.url().replace(/\?.*/, '').slice(0, 160), text: t }); fs.writeFileSync(path.join(CAP, 'def-' + defs.length + '.json'), t.slice(0, 2000000)); } } catch (e) {} });
+  ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (!/json/i.test(ct)) return; const t = await rep.text(); if (/"circuitsContent"/.test(t) && !circuitsDef) { circuitsDef = t; fs.writeFileSync(path.join(CAP, 'circuits.json'), t.slice(0, 3000000)); } if (/SOCOTEC|Bureau Contr/i.test(t) && !/getFilesFromCat/.test(rep.url()) && defs.length < 4) { defs.push({ url: rep.url().replace(/\?.*/, '').slice(0, 160), text: t }); fs.writeFileSync(path.join(CAP, 'def-' + defs.length + '.json'), t.slice(0, 2000000)); } } catch (e) {} });
   ctx.on('page', async p => { try { await p.waitForLoadState('domcontentloaded'); page = p; note('Nouvel onglet : ' + p.url().slice(0, 60)); } catch (e) {} });
   /* Adresse sans paramètres (pas de jeton dans le journal) */
   const ou = () => { try { const u = new URL(page.url()); return u.host + u.pathname + u.hash.slice(0, 40); } catch (e) { return '?'; } };
@@ -171,65 +171,54 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
       }
       return rows;
     };
-    /* === Source de données : le service fichiers.getFilesFromCat, rejoué avec une grande limite === */
+    /* === Source de données : le service fichiers.getFilesFromCat, rejoué DEPUIS LA PAGE (mêmes cookies et en-têtes), par tranches === */
     let viaApi = null;
     try {
       const dernier = appels[appels.length - 1];
-      if (dernier) {
-        fs.writeFileSync(path.join(CAP, 'appel-post.json'), dernier.post.slice(0, 20000));
-        fs.writeFileSync(path.join(CAP, 'api-complet.json'), dernier.text);
-        let body = null; try { body = JSON.parse(dernier.post); } catch (e) {}
-        const compte = o => { try { return (o.fichiers || o.result?.fichiers || o.data?.fichiers || []).length; } catch (e) { return 0; } };
-        let meilleur = { text: dernier.text, n: compte(JSON.parse(dernier.text)) };
-        note('Service fichiers : ' + meilleur.n + ' fichiers dans la réponse captée ; corps = ' + dernier.post.slice(0, 600));
-        if (body) {
-          /* Chercher les champs de pagination (valeur = taille de page courante) et les agrandir */
-          const cles = [];
-          const marche = (o, chemin) => { if (!o || typeof o !== 'object') return; for (const k in o) { const v = o[k]; if (typeof v === 'number' || /^\d+$/.test(String(v))) { if (/limit|nb|count|size|perpage|per_page|max|length|rows|pagesize/i.test(k) || [30, 50, meilleur.n].includes(+v)) cles.push({ chemin: chemin.concat(k), v: +v }); } else if (typeof v === 'object') marche(v, chemin.concat(k)); } };
-          marche(body, []);
-          note('Champs de pagination candidats : ' + JSON.stringify(cles).slice(0, 800));
-          const set = (o, chemin, val) => { let c = o; for (let i = 0; i < chemin.length - 1; i++) c = c[chemin[i]]; c[chemin[chemin.length - 1]] = typeof c[chemin[chemin.length - 1]] === 'string' ? String(val) : val; };
-          const essais = [];
-          for (const c of cles) { const b2 = JSON.parse(JSON.stringify(body)); set(b2, c.chemin, 10000); essais.push({ nom: c.chemin.join('.'), b: b2 }); }
-          const b3 = JSON.parse(JSON.stringify(body)); for (const c of cles) set(b3, c.chemin, 10000); essais.push({ nom: 'tous', b: b3 });
-          for (const e of essais) {
-            try {
-              const rep = await page.request.post(dernier.url, { data: JSON.stringify(e.b), headers: { 'content-type': dernier.headers['content-type'] || 'application/json', accept: 'application/json' }, timeout: 180000 });
-              const txt = await rep.text(); let n = 0; try { n = compte(JSON.parse(txt)); } catch (x) {}
-              note('Essai ' + e.nom + ' -> ' + rep.status() + ', ' + n + ' fichiers, ' + txt.length + ' octets');
-              if (n > meilleur.n) meilleur = { text: txt, n };
-              if (n >= 3000) break;
-            } catch (x) { note('Essai ' + e.nom + ' : ' + x.message); }
-          }
-        }
-        if (meilleur.n > 0) { fs.writeFileSync(path.join(CAP, 'api-complet.json'), meilleur.text); viaApi = JSON.parse(meilleur.text); note('Source retenue : service de données, ' + meilleur.n + ' fichiers'); }
-      } else note('Aucun appel getFilesFromCat capté — lecture à l\'écran');
-    } catch (e) { note('Service de données : ' + e.message); }
+      if (!dernier) throw new Error('aucun appel getFilesFromCat capté');
+      fs.writeFileSync(path.join(CAP, 'appel-post.json'), dernier.post.slice(0, 20000));
+      const body = JSON.parse(dernier.post); const P = body.params[0];
+      const hdr = {}; for (const k in dernier.headers) if (!/^(:|host$|content-length$|cookie$|origin$|referer$|user-agent$|accept-encoding$|connection$)/i.test(k)) hdr[k] = dernier.headers[k];
+      const TAKE = 100; const fichiers = []; const visasUtiles = {}; let totalApi = 0;
+      for (let skip = 0; skip < 20000; skip += TAKE) {
+        P.LIMITSKIP = skip; P.LIMITTAKE = TAKE; P.microtime = Date.now();
+        const res = await page.evaluate(async ({ url, hdr, corps }) => {
+          const r = await fetch(url, { method: 'POST', headers: hdr, body: corps, credentials: 'include' });
+          const t = await r.text(); if (r.status !== 200) return { status: r.status, err: t.slice(0, 300) };
+          const o = JSON.parse(t); const F = o.fichiers || []; const V = o.visas || {}; const vu = {};
+          for (const id in V) { const s = {}; for (const k in V[id]) { const v = V[id][k]; if (String(v.fv_subvisa) !== '-2') s[k] = { sub: v.fv_subvisa, date: v.fv_date, com: v.comment || '', par: [v.sender_firestname, v.sender_lastname].filter(Boolean).join(' '), titre: v.titleVisa || '', chrono: v.numChronoVisa || '' }; } vu[id] = s; }
+          return { status: 200, total: o.total, n: F.length, fichiers: F.map(f => ({ item_id: f.item_id, entete_nom: f.entete_nom, entete_oldName: f.entete_oldName, files_desc: f.files_desc, files_date: f.files_date, files_size: f.files_size, circuit: f.circuit, createby: f.createby, user_email: f.user_email, entete_archive: f.entete_archive, files_nbrev: f.files_nbrev, fcat_chemin: f.fcat_chemin, entete_version: f.entete_version })), visas: vu };
+        }, { url: dernier.url, hdr, corps: JSON.stringify(body) });
+        if (res.status !== 200) { note('Tranche ' + skip + ' : HTTP ' + res.status + ' ' + (res.err || '')); if (!fichiers.length) throw new Error('service refusé (' + res.status + ')'); break; }
+        totalApi = +res.total || totalApi; fichiers.push(...res.fichiers); Object.assign(visasUtiles, res.visas);
+        if (skip === 0 || (skip / TAKE) % 10 === 0) note('Tranche ' + skip + ' : ' + res.n + ' fichiers (total annoncé ' + res.total + ')');
+        if (res.n < TAKE || (totalApi && fichiers.length >= totalApi)) break;
+      }
+      note('Service de données : ' + fichiers.length + ' fichiers lus sur ' + totalApi);
+      if (fichiers.length) viaApi = { fichiers, visas: visasUtiles, total: totalApi };
+    } catch (e) { note('Service de données : ' + e.message + ' — repli sur la lecture écran'); }
     const t0 = (await texte()) + ' ';
     let total = parseInt((t0.match(/de (\d+) Fichiers/) || [0, 0])[1]) || 0;
     if (!total) { for (const fr of page.frames()) { const m = (await fr.evaluate(() => document.body ? document.body.innerText : '').catch(() => '')).replace(/\s+/g, ' ').match(/de (\d+) Fichiers/); if (m) { total = +m[1]; break; } } }
-    const parPage = parseInt((t0.match(/1 - (\d+) de/) || [0, 50])[1]) || 50;
-    const nbPages = total ? Math.ceil(total / parPage) : 1;
-    note('Total ' + total + ' fichiers, ' + parPage + ' par page, ' + nbPages + ' pages');
     if (viaApi) {
-      const F = viaApi.fichiers || (viaApi.result && viaApi.result.fichiers) || (viaApi.data && viaApi.data.fichiers) || [];
-      const V = viaApi.visas || (viaApi.result && viaApi.result.visas) || (viaApi.data && viaApi.data.visas) || {};
-      /* Libellés des étapes de visa (index fv_visa -> intervenant), s'ils figurent dans une définition captée */
-      const libelles = {};
-      for (const d of defs) { try { const o = JSON.parse(d.text); const marche = (x, prof) => { if (!x || typeof x !== 'object' || prof > 6) return; if (Array.isArray(x)) { x.forEach(y => marche(y, prof + 1)); return; } const nom = x.nom || x.name || x.libelle || x.label || x.title || x.titre; const id = x.ordre ?? x.order ?? x.position ?? x.num ?? x.index ?? x.visa ?? x.id; if (typeof nom === 'string' && /^\d{2}-[A-Z]{2,5}\b/.test(nom) && id !== undefined) libelles[String(id)] = nom; for (const k in x) marche(x[k], prof + 1); }; marche(o, 0); } catch (e) {} }
-      note('Libellés d\'étapes trouvés : ' + Object.keys(libelles).length + ' | définitions captées : ' + defs.map(d => d.url).join(' ; '));
-      const sub = s => { s = String(s); return s === '-2' ? 'NC' : s === '-1' ? 'ATT' : s === '0' ? 'ATT' : s === '1' ? 'VSO' : s === '2' ? 'VAO' : s === '3' ? 'REF' : 'ATT'; };
+      /* Circuits de visa : libellé et liste des avis possibles de chaque étape (réponse init.getTabs captée) */
+      const circuits = {}; const nomsCircuits = {};
+      try { const c = JSON.parse(circuitsDef || '{}'); Object.assign(nomsCircuits, c.circuitsName || {}); for (const ck in (c.circuitsContent || {})) { const id = ck.replace(/^c/, ''); circuits[id] = {}; for (const sk in c.circuitsContent[ck]) { const st = c.circuitsContent[ck][sk]; let subs = []; try { subs = JSON.parse(st.notes_content || '{}').subVisas || []; } catch (e) {} circuits[id][sk.replace(/^c/, '')] = { label: st.label || '', subs }; } } } catch (e) { note('Circuits : ' + e.message); }
+      note('Circuits connus : ' + Object.keys(circuits).map(k => k + '=' + nomsCircuits[k] + ' (' + Object.keys(circuits[k]).length + ' étapes)').join(', '));
+      const norm = lab => { lab = String(lab || '').toUpperCase(); return /^FAV|VSO|^VAL$|APPROUV/.test(lab) ? 'VSO' : /VAB|REF|DEFAV|REJ/.test(lab) ? 'REF' : /VAO|OBS/.test(lab) ? 'VAO' : /^NC|ANN|PI$|INFO/.test(lab) ? 'NC' : 'ATT'; };
       const out = [];
-      for (const f of F) {
-        const nom = String(f.entete_nom || f.name || ''); if (!/^HMIMV-/i.test(nom)) continue;
+      for (const f of viaApi.fichiers) {
+        const nom = String(f.entete_nom || ''); if (!/^HMIMV-/i.test(nom)) continue;
         const brut = nom.replace(/\.[a-z0-9]{2,5}$/i, ''), code = brut.split('_')[0].trim(), p = code.split('-');
-        const vs = V[f.item_id] || V[f.files_id] || V[f.entete_id] || V[f.id] || {};
-        const visas = Object.keys(vs).map(k => { const v = vs[k]; return { k: libelles[k] ? (libelles[k].match(/^\d{2}-([A-Z]{2,5})/) || ['', 'V' + k])[1] : 'V' + k, lab: libelles[k] || ('Étape ' + k), etape: +k, avis: sub(v.fv_subvisa), sous: String(v.fv_subvisa), date: v.fv_date ? new Date(+v.fv_date * 1000).toISOString() : '', par: [v.sender_firestname, v.sender_lastname].filter(Boolean).join(' '), commentaire: v.comment || '', titre: v.titleVisa || '' }; }).sort((a, b) => a.etape - b.etape);
+        const circ = circuits[String(f.circuit)] || {}; const vs = viaApi.visas[f.item_id] || {};
+        const visas = Object.keys(vs).map(k => { const v = vs[k], st = circ[k] || {}, lab = st.label || ('Étape ' + k); const s = String(v.sub); const sv = s === '-1' ? null : (st.subs || []).find(x => String(x.index) === s); const avis = s === '-1' ? 'ATT' : sv ? norm(sv.label) : 'ATT'; return { etape: +k, k: (lab.match(/^\d{2}-([A-Z]{2,5})/) || lab.match(/^([A-Z]{2,5})\b/) || ['', 'V' + k])[1], lab, lot: /^Lot \d+/.test(lab), avis, code: sv ? sv.label : (s === '-1' ? 'ATT' : s), libelle: sv ? sv.LongDesc : (s === '-1' ? 'En attente de visa' : ''), date: v.date ? new Date(+v.date * 1000).toISOString() : '', par: v.par, commentaire: v.com, titre: v.titre, chrono: v.chrono }; }).sort((a, b) => a.etape - b.etape);
+        const inter = visas.filter(v => !v.lot); const lotStep = visas.find(v => v.lot);
+        const etat = inter.some(v => v.avis === 'REF') ? 'REF' : inter.some(v => v.avis === 'ATT') ? 'ATT' : inter.some(v => v.avis === 'VAO') ? 'VAO' : inter.some(v => v.avis === 'VSO') ? 'VSO' : 'ATT';
         const chemin = String(f.fcat_chemin || ''); const lotM = chemin.match(/Lot (\d+)\s*-\s*([^/]+)/i);
-        out.push({ code, titre: String(f.entete_oldName || brut).replace(/\.[a-z0-9]{2,5}$/i, ''), phase: (p[1] || '').toUpperCase(), lot: p[3] || (lotM ? lotM[1] : ''), lotLab: lotM ? 'Lot ' + lotM[1] + ' - ' + lotM[2].trim() : '', dossier: chemin, type: p[4] || '', bat: (p[5] || '').toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(p[9] || '00').padStart(2, '0'), emetteur: String(f.createby || ''), email: String(f.user_email || ''), date: f.files_date ? new Date(+f.files_date * 1000).toISOString() : '', taille: +f.files_size || 0, revisions: +f.files_nbrev || 1, archive: f.entete_archive === '1', circuit: String(f.circuit || ''), visas, historique: [] });
+        out.push({ code, titre: String(f.files_desc || f.entete_oldName || brut).replace(/\.[a-z0-9]{2,5}$/i, ''), phase: (p[1] || '').toUpperCase(), lot: p[3] || (lotM ? lotM[1] : ''), lotLab: lotStep ? lotStep.lab : (lotM ? 'Lot ' + lotM[1] + ' - ' + lotM[2].trim() : ''), dossier: chemin, type: p[4] || '', bat: (p[5] || '').toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(p[9] || '00').padStart(2, '0'), emetteur: String(f.createby || ''), email: String(f.user_email || ''), date: f.files_date ? new Date(+f.files_date * 1000).toISOString() : '', depot: lotStep && lotStep.date ? lotStep.date : '', taille: +f.files_size || 0, revisions: +f.files_nbrev || 1, archive: f.entete_archive === '1', circuit: nomsCircuits[String(f.circuit)] || String(f.circuit || ''), etat, visas });
       }
       if (!out.length) throw new Error('Service de données : aucun code HMIMV reconnu');
-      fs.writeFileSync(path.join(__dirname, '..', 'kairnial.json'), JSON.stringify({ ok: true, date: new Date().toISOString(), total: total || out.length, source: 'service', libelles, docs: out }));
+      fs.writeFileSync(path.join(__dirname, '..', 'kairnial.json'), JSON.stringify({ ok: true, date: new Date().toISOString(), total: viaApi.total || total || out.length, source: 'service', docs: out }));
       note('kairnial.json écrit depuis le service : ' + out.length + ' documents');
       console.log(out.length + ' documents (service de données)');
       return;
