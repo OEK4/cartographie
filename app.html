@@ -14,7 +14,8 @@ var APPS = {
   saisie: { nom: "Saisie terrain", sig: "saisie terrain", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Saisie%20terrain%20-%20NHM.html" },
   carto:  { nom: "Cartographie", sig: "cartographie", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/index.html" },
   resultats: { nom: "Résultats", sig: "résultats", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Resultats%20-%20NHM.html" },
-  vue3d: { nom: "Vue 3D", sig: "vue 3d", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Vue%203D.html" }
+  vue3d: { nom: "Vue 3D", sig: "vue 3d", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Vue%203D.html" },
+  docs: { nom: "Documents Kairnial", sig: "documents kairnial", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Documents%20Kairnial.html" }
 };
 var VERSION = "2026.08.2";
 </script>
@@ -26,7 +27,7 @@ html,body{margin:0;height:100%;background:#0E1512;color:#F2F1ED;font-family:'Arc
 #appFond img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.16;}
 #appFond .g{position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 45%,rgba(20,27,23,.55) 0%,rgba(20,27,23,.94) 68%);}
 #carte{position:relative;width:min(880px,100%);transform:scale(.94);opacity:0;animation:entree .75s cubic-bezier(.16,.9,.3,1) .05s forwards;background:#F7F6F3;border-radius:18px;box-shadow:0 34px 90px rgba(0,0,0,.55);overflow:hidden;}
-#carte .band{height:6px;background:linear-gradient(90deg,#E8A13C 0 33.33%,#5B8DEF 33.33% 66.66%,#57B26B 66.66% 100%);}
+#carte .band{height:6px;background:linear-gradient(90deg,#E8A13C 0 25%,#5B8DEF 25% 50%,#57B26B 50% 75%,#E8632B 75% 90%,#9B7BD4 90% 100%);}
 #carte .in{padding:34px 40px 26px;}
 .logos{display:flex;align-items:center;gap:16px;}
 .logos img{display:block;}
@@ -34,11 +35,34 @@ html,body{margin:0;height:100%;background:#0E1512;color:#F2F1ED;font-family:'Arc
 h1{font-family:'Archivo','Segoe UI',Arial,sans-serif;font-size:clamp(27px,3.4vw,36px);font-weight:800;letter-spacing:-.5px;margin:22px 0 0;line-height:1.06;color:#1F2620;}
 .sous{font-size:15.5px;color:#6B675F;margin-top:7px;}
 .ver{margin-top:3px;font-size:11.5px;color:#A8A49C;letter-spacing:1.6px;font-weight:700;}
-.choix{margin-top:24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;}
-button.app{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:20px 22px;border:1px solid #DDD9D2;border-top:7px solid var(--c);border-radius:13px;background:#FFFFFF;cursor:pointer;text-align:left;font-family:inherit;transition:transform .13s,box-shadow .13s,background .13s;}
+.etq{margin-top:26px;display:flex;align-items:center;gap:12px;font-size:10.5px;letter-spacing:2px;font-weight:700;color:#A8A49C;}
+.etq::after{content:"";flex:1;height:1px;background:#E3E0DA;}
+.choix{margin-top:12px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;position:relative;}
+.choix::before{content:"";position:absolute;left:12%;right:12%;top:50%;height:1px;background:#DDD9D2;z-index:0;}
+.choix button.app{position:relative;z-index:1;}
+button.app .n{position:absolute;top:-13px;left:18px;width:24px;height:24px;border-radius:50%;background:var(--c);color:#FFFFFF;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px #F7F6F3;}
+.vues{margin-top:14px;display:grid;grid-template-columns:1.9fr 1fr;gap:16px;}
+.vues button.v3d{margin-top:0;padding:14px 18px 14px 14px;gap:14px;}
+.vues button.v3d .t1{font-size:19px;white-space:nowrap;}
+.vues button.v3d .t2{font-size:12.5px;}
+.vues button.v3d .bats{width:104px;height:44px;}
+@media(max-width:1000px){.vues button.v3d .bats{display:none}}
+button.docs{position:relative;display:flex;align-items:center;gap:14px;padding:16px 18px;border:1px solid #DDD9D2;border-radius:14px;background:#FFFFFF;cursor:pointer;text-align:left;font-family:inherit;transition:transform .13s,box-shadow .13s;overflow:hidden;}
+button.docs::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:#9B7BD4;}
+button.docs:hover{transform:translateY(-3px);box-shadow:0 14px 30px rgba(31,38,32,.16);}
+button.docs .ic{flex:none;width:46px;height:46px;border-radius:11px;background:#F1ECFA;color:#9B7BD4;display:flex;align-items:center;justify-content:center;}
+button.docs .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+button.docs .t1{font-family:'Archivo','Segoe UI',Arial,sans-serif;font-size:18px;font-weight:800;color:#1F2620;letter-spacing:.2px;}
+button.docs .t2{font-size:12.5px;font-weight:600;color:#6B675F;display:flex;align-items:center;gap:6px;}
+button.docs .t2 i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#57B26B;animation:kpulse 1.8s ease-in-out infinite;}
+@keyframes kpulse{0%,100%{opacity:1}50%{opacity:.3}}
+button.docs .go{flex:none;font-size:20px;font-weight:700;color:#9B7BD4;transition:transform .15s;}
+button.docs:hover .go{transform:translateX(5px);}
+@media(max-width:760px){.choix{grid-template-columns:1fr;gap:18px}.choix::before{display:none}.vues{grid-template-columns:1fr}}
+button.app{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:22px 20px 18px;border:1px solid #DDD9D2;border-top:7px solid var(--c);border-radius:13px;background:#FFFFFF;cursor:pointer;text-align:left;font-family:inherit;transition:transform .13s,box-shadow .13s,background .13s;}
 button.app:hover{background:#FFFDF9;transform:translateY(-3px);box-shadow:0 14px 30px rgba(31,38,32,.16);}
 button.app .b{font-size:11px;font-weight:700;letter-spacing:1.4px;color:#8C8880;}
-button.app .t{font-size:24px;font-weight:700;color:#1F2620;line-height:1.15;}
+button.app .t{font-size:22px;font-weight:700;color:#1F2620;line-height:1.15;}
 button.app .fl{margin-top:8px;font-size:19px;color:var(--c);font-weight:700;}
 #msg{margin-top:15px;font-size:13.5px;color:#6B675F;min-height:19px;}
 .bar{height:4px;background:#E3E0DA;border-radius:3px;overflow:hidden;margin-top:7px;opacity:0;transition:opacity .2s;}
@@ -83,7 +107,7 @@ button.v3d .go{position:relative;flex:none;font-size:22px;font-weight:700;color:
 @media(max-width:640px){button.v3d .bats{display:none}}
 button.v3d:hover .go{transform:translateX(5px);}
 @keyframes balaye{0%{transform:translateX(-100%)}45%,100%{transform:translateX(100%)}}
-@media(max-width:640px){.choix{grid-template-columns:1fr}button.v3d .t1{font-size:18px}#carte .in{padding:26px 24px 20px}#refs,#pied{padding-left:24px;padding-right:24px}}
+@media(max-width:640px){button.v3d .t1{font-size:18px}#carte .in{padding:26px 24px 20px}#refs,#pied{padding-left:24px;padding-right:24px}}
 @keyframes entree{to{transform:none;opacity:1}}
 @keyframes ouverture{from{transform:scale(.86);opacity:0}to{transform:none;opacity:1}}
 #splash{position:fixed;inset:0;z-index:100;background:#0B110E;display:flex;align-items:center;justify-content:center;transition:opacity .7s ease;}
@@ -157,26 +181,32 @@ button.v3d:hover .go{transform:translateX(5px);}
       <h1>Viewer &middot; HMIMV</h1>
       <div class="sous">Du pointage terrain &agrave; la d&eacute;cision &middot; SSP &middot; TSG &middot; SMT &middot; CDI</div>
       <div class="ver">VERSION <span id="v"></span></div>
+      <div class="etq">PARCOURS &middot; DU TERRAIN &Agrave; LA D&Eacute;CISION</div>
       <div class="choix">
         <button class="app" style="--c:#E8A13C" onclick="ouvrir('saisie')">
+          <span class="n">1</span>
           <div class="b">ACC&Egrave;S LIBRE &middot; NOM DEMAND&Eacute;</div>
           <div class="t">Saisie terrain</div>
           <div class="fl">&#8594;</div>
         </button>
         <button class="app" style="--c:#5B8DEF" onclick="ouvrir('carto')">
+          <span class="n">2</span>
           <div class="b">ACC&Egrave;S R&Eacute;SERV&Eacute; &middot; ADRESSE + CODE</div>
           <div class="t">Cartographie</div>
           <div class="fl">&#8594;</div>
         </button>
-    <button class="app" style="--c:#57B26B" onclick="ouvrir('resultats')">
-      <div class="b">ACC&Egrave;S R&Eacute;SERV&Eacute; &middot; SUIVI HEBDOMADAIRE</div>
-      <div class="t">R&eacute;sultats</div>
-      <div class="fl">&#8594;</div>
-    </button>
+        <button class="app" style="--c:#57B26B" onclick="ouvrir('resultats')">
+          <span class="n">3</span>
+          <div class="b">ACC&Egrave;S R&Eacute;SERV&Eacute; &middot; SUIVI HEBDOMADAIRE</div>
+          <div class="t">R&eacute;sultats</div>
+          <div class="fl">&#8594;</div>
+        </button>
       </div>
+      <div class="etq">VUES &middot; MAQUETTE ET DOCUMENTS</div>
+      <div class="vues">
       <button class="v3d" onclick="ouvrir('vue3d')">
         <span class="ic">3D</span>
-        <span class="tx"><span class="t1">VUE 3D &middot; HMIMV</span><span class="t2">Nouvel H&ocirc;pital Militaire &middot; maquette des b&acirc;timents &middot; suivi CET</span></span>
+        <span class="tx"><span class="t1">VUE 3D &middot; HMIMV</span><span class="t2">Maquette des b&acirc;timents &middot; suivi CET</span></span>
         <span class="bats" aria-hidden="true">
           <svg viewBox="12 -1 126 51">
             <line class="sol" x1="12" y1="48" x2="138" y2="48" pathLength="1"></line>
@@ -218,6 +248,12 @@ button.v3d:hover .go{transform:translateX(5px);}
         </span>
         <span class="go">&#8594;</span>
       </button>
+      <button class="docs" onclick="ouvrir('docs')">
+        <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M14 3v6h6"></path><path d="M9 14l2 2 4-4"></path></svg></span>
+        <span class="tx"><span class="t1">DOCUMENTS</span><span class="t2"><i></i>Kairnial &middot; visas en temps r&eacute;el</span></span>
+        <span class="go">&#8594;</span>
+      </button>
+      </div>
       <div id="msg"></div>
       <div class="bar" id="bar"><i></i></div>
     </div>
