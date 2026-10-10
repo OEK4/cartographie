@@ -180,24 +180,25 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     const parPage = parseInt((t0.match(/1 - (\d+) de/) || [0, 50])[1]) || 50;
     const nbPages = total ? Math.ceil(total / parPage) : 1;
     note('Total ' + total + ' fichiers, ' + parPage + ' par page, ' + nbPages + ' pages ; déjà collectés : ' + collecte.size);
+    const TAKE = 100; let ok = false;
     try {
       const dernier = appels[appels.length - 1];
       if (!dernier) throw new Error('aucun appel getFilesFromCat capté');
       fs.writeFileSync(path.join(CAP, 'appel-post.json'), dernier.post.slice(0, 20000));
       const body = JSON.parse(dernier.post); const P = body.params[0];
-      const hdr = {}; for (const k in dernier.headers) if (!/^(:|host$|content-length$|cookie$|origin$|referer$|user-agent$|accept-encoding$|connection$)/i.test(k)) hdr[k] = dernier.headers[k];
+      const hdr = {}; for (const k in dernier.headers) if (/^(content-type|accept|x-xsrf-token|x-csrf-token|authorization|userhash|machineid)$/i.test(k)) hdr[k] = dernier.headers[k];
+      note('En-têtes rejoués : ' + Object.keys(hdr).join(', '));
       const cookies = await ctx.cookies(); const ck = cookies.find(c => /xsrf|csrf/i.test(c.name));
       note('Cookies : ' + cookies.map(c => c.name).join(', ') + (ck ? ' | jeton CSRF trouvé dans ' + ck.name : ' | aucun cookie CSRF'));
-      const TAKE = 100; let ok = false;
       for (let skip = 0; skip < 20000; skip += TAKE) {
         P.LIMITSKIP = skip; P.LIMITTAKE = TAKE; P.microtime = Date.now();
         const res = await page.evaluate(async ({ url, hdr, body, cookieTok }) => {
           const m = document.cookie.match(/(?:^|;\s*)(XSRF-TOKEN|csrf_token|_csrf|XSRF_TOKEN)=([^;]+)/i);
           const tok = m ? decodeURIComponent(m[2]) : (cookieTok || null);
-          if (tok) { body.headers['X-XSRF-TOKEN'] = tok; hdr['X-XSRF-TOKEN'] = tok; hdr['x-csrf-token'] = tok; }
-          const r = await fetch(url, { method: 'POST', headers: hdr, body: JSON.stringify(body), credentials: 'include' });
-          const t = await r.text(); if (r.status !== 200) return { status: r.status, err: t.slice(0, 300), tok: tok ? 'oui' : 'non' };
-          const o = JSON.parse(t); const F = o.fichiers || []; const V = o.visas || {}; const vu = {};
+          if (tok) { body.headers['X-XSRF-TOKEN'] = tok; if (hdr['x-xsrf-token'] !== undefined) hdr['x-xsrf-token'] = tok; }
+          let r, t; try { r = await fetch(url, { method: 'POST', headers: hdr, body: JSON.stringify(body), credentials: 'include' }); t = await r.text(); } catch (e) { return { status: 0, err: String(e), tok: tok ? 'oui' : 'non' }; }
+          if (r.status !== 200) return { status: r.status, err: t.slice(0, 300), tok: tok ? 'oui' : 'non' };
+          let o; try { o = JSON.parse(t); } catch (e) { return { status: 0, err: 'JSON invalide', tok: tok ? 'oui' : 'non' }; } const F = o.fichiers || []; const V = o.visas || {}; const vu = {};
           for (const id in V) { const s = {}; for (const k in V[id]) { const v = V[id][k]; if (String(v.fv_subvisa) !== '-2') s[k] = v; } vu[id] = s; }
           return { status: 200, total: o.total, n: F.length, data: { fichiers: F, visas: vu, total: o.total } };
         }, { url: dernier.url, hdr, body, cookieTok: ck ? ck.value : null });
@@ -206,7 +207,9 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
         if (skip === 0 || (skip / TAKE) % 10 === 0) note('Tranche ' + skip + ' : ' + n + ' fichiers (total annoncé ' + res.total + ')');
         if (n < TAKE || (totalService && collecte.size >= totalService)) break;
       }
-      if (!ok) {
+    } catch (e) { note('Service de données : ' + e.message); }
+    if (!ok) {
+      try {
         /* Repli : parcourir les pages à l'écran ; chaque page déclenche un appel getFilesFromCat que l'on réduit au vol */
         note('Repli : pagination à l\'écran sur ' + nbPages + ' pages');
         for (let pg = 2; pg <= nbPages && pg <= 400; pg++) {
@@ -223,8 +226,8 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
           if (pg % 10 === 0) note('Page ' + pg + '/' + nbPages + ' : cumul ' + collecte.size);
           if (collecte.size === avant) note('Page ' + pg + ' : aucune nouvelle donnée');
         }
-      }
-    } catch (e) { note('Service de données : ' + e.message); }
+      } catch (e) { note('Pagination : ' + e.message); }
+    }
     note('Collecte : ' + collecte.size + ' fichiers (total service ' + totalService + ')');
     if (collecte.size) { const fichiers = [...collecte.values()]; const visas = {}; fichiers.forEach(f => { visas[f.item_id] = f.visas; }); viaApi = { fichiers, visas, total: totalService || total }; }
     if (viaApi) {
