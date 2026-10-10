@@ -41,8 +41,9 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
   let page = await ctx.newPage();
   /* Si Kairnial ouvre un module dans un nouvel onglet, on bascule dessus */
   /* Écoute des réponses du serveur : la liste des documents arrive en JSON — on garde celles qui contiennent des codes HMIMV */
-  const api = []; let nApi = 0; const appels = []; const defs = []; let circuitsDef = null;
-  ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (/image|font|css|javascript|octet/i.test(ct)) return; const t = await rep.text(); if (!/HMIMV-/.test(t)) return; const u = rep.url(); const req = rep.request(); const postFull = req.postData() || ''; const post = postFull.slice(0, 300); if (/getFilesFromCat/.test(u)) appels.push({ url: u, post: postFull, text: t, headers: req.headers() }); api.push({ url: u.replace(/\?.*/, '').slice(0, 160), ct: ct.slice(0, 40), method: req.method(), post, taille: t.length, nb: (t.match(/HMIMV-/g) || []).length }); if (nApi < 3) { nApi++; fs.writeFileSync(path.join(CAP, 'api-' + nApi + '.json'), t.slice(0, 400000)); } } catch (e) {} });
+  const api = []; let nApi = 0; const appels = []; const defs = []; let circuitsDef = null; const collecte = new Map(); let totalService = 0;
+  const reduire = (o) => { const F = o.fichiers || []; const V = o.visas || {}; totalService = +o.total || totalService; for (const f of F) { const s = {}; const vv = V[f.item_id] || {}; for (const k in vv) { const v = vv[k]; if (v.sub !== undefined) { s[k] = v; continue; } if (String(v.fv_subvisa) !== '-2') s[k] = { sub: v.fv_subvisa, date: v.fv_date, com: v.comment || '', par: [v.sender_firestname, v.sender_lastname].filter(Boolean).join(' '), titre: v.titleVisa || '', chrono: v.numChronoVisa || '' }; } collecte.set(String(f.item_id), { item_id: f.item_id, entete_nom: f.entete_nom, entete_oldName: f.entete_oldName, files_desc: f.files_desc, files_date: f.files_date, files_size: f.files_size, circuit: f.circuit, createby: f.createby, user_email: f.user_email, entete_archive: f.entete_archive, files_nbrev: f.files_nbrev, fcat_chemin: f.fcat_chemin, visas: s }); } return F.length; };
+  ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (/image|font|css|javascript|octet/i.test(ct)) return; const t = await rep.text(); if (!/HMIMV-/.test(t)) return; const u = rep.url(); const req = rep.request(); const postFull = req.postData() || ''; const post = postFull.slice(0, 300); if (/getFilesFromCat/.test(u)) { appels.push({ url: u, post: postFull, headers: req.headers() }); try { reduire(JSON.parse(t)); } catch (e) {} } api.push({ url: u.replace(/\?.*/, '').slice(0, 160), ct: ct.slice(0, 40), method: req.method(), post, taille: t.length, nb: (t.match(/HMIMV-/g) || []).length }); if (nApi < 3) { nApi++; fs.writeFileSync(path.join(CAP, 'api-' + nApi + '.json'), t.slice(0, 400000)); } } catch (e) {} });
   ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (!/json/i.test(ct)) return; const t = await rep.text(); if (/"circuitsContent"/.test(t) && !circuitsDef) { circuitsDef = t; fs.writeFileSync(path.join(CAP, 'circuits.json'), t.slice(0, 3000000)); } if (/SOCOTEC|Bureau Contr/i.test(t) && !/getFilesFromCat/.test(rep.url()) && defs.length < 4) { defs.push({ url: rep.url().replace(/\?.*/, '').slice(0, 160), text: t }); fs.writeFileSync(path.join(CAP, 'def-' + defs.length + '.json'), t.slice(0, 2000000)); } } catch (e) {} });
   ctx.on('page', async p => { try { await p.waitForLoadState('domcontentloaded'); page = p; note('Nouvel onglet : ' + p.url().slice(0, 60)); } catch (e) {} });
   /* Adresse sans paramètres (pas de jeton dans le journal) */
@@ -171,35 +172,61 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
       }
       return rows;
     };
-    /* === Source de données : le service fichiers.getFilesFromCat, rejoué DEPUIS LA PAGE (mêmes cookies et en-têtes), par tranches === */
+    /* === Source de données : fichiers.getFilesFromCat. 1) rejoué depuis la page avec un jeton CSRF frais ; 2) sinon, pagination à l'écran en captant chaque réponse === */
     let viaApi = null;
+    const t0 = (await texte()) + ' ';
+    let total = parseInt((t0.match(/de (\d+) Fichiers/) || [0, 0])[1]) || 0;
+    if (!total) { for (const fr of page.frames()) { const m = (await fr.evaluate(() => document.body ? document.body.innerText : '').catch(() => '')).replace(/\s+/g, ' ').match(/de (\d+) Fichiers/); if (m) { total = +m[1]; break; } } }
+    const parPage = parseInt((t0.match(/1 - (\d+) de/) || [0, 50])[1]) || 50;
+    const nbPages = total ? Math.ceil(total / parPage) : 1;
+    note('Total ' + total + ' fichiers, ' + parPage + ' par page, ' + nbPages + ' pages ; déjà collectés : ' + collecte.size);
     try {
       const dernier = appels[appels.length - 1];
       if (!dernier) throw new Error('aucun appel getFilesFromCat capté');
       fs.writeFileSync(path.join(CAP, 'appel-post.json'), dernier.post.slice(0, 20000));
       const body = JSON.parse(dernier.post); const P = body.params[0];
       const hdr = {}; for (const k in dernier.headers) if (!/^(:|host$|content-length$|cookie$|origin$|referer$|user-agent$|accept-encoding$|connection$)/i.test(k)) hdr[k] = dernier.headers[k];
-      const TAKE = 100; const fichiers = []; const visasUtiles = {}; let totalApi = 0;
+      const cookies = await ctx.cookies(); const ck = cookies.find(c => /xsrf|csrf/i.test(c.name));
+      note('Cookies : ' + cookies.map(c => c.name).join(', ') + (ck ? ' | jeton CSRF trouvé dans ' + ck.name : ' | aucun cookie CSRF'));
+      const TAKE = 100; let ok = false;
       for (let skip = 0; skip < 20000; skip += TAKE) {
         P.LIMITSKIP = skip; P.LIMITTAKE = TAKE; P.microtime = Date.now();
-        const res = await page.evaluate(async ({ url, hdr, corps }) => {
-          const r = await fetch(url, { method: 'POST', headers: hdr, body: corps, credentials: 'include' });
-          const t = await r.text(); if (r.status !== 200) return { status: r.status, err: t.slice(0, 300) };
+        const res = await page.evaluate(async ({ url, hdr, body, cookieTok }) => {
+          const m = document.cookie.match(/(?:^|;\s*)(XSRF-TOKEN|csrf_token|_csrf|XSRF_TOKEN)=([^;]+)/i);
+          const tok = m ? decodeURIComponent(m[2]) : (cookieTok || null);
+          if (tok) { body.headers['X-XSRF-TOKEN'] = tok; hdr['X-XSRF-TOKEN'] = tok; hdr['x-csrf-token'] = tok; }
+          const r = await fetch(url, { method: 'POST', headers: hdr, body: JSON.stringify(body), credentials: 'include' });
+          const t = await r.text(); if (r.status !== 200) return { status: r.status, err: t.slice(0, 300), tok: tok ? 'oui' : 'non' };
           const o = JSON.parse(t); const F = o.fichiers || []; const V = o.visas || {}; const vu = {};
-          for (const id in V) { const s = {}; for (const k in V[id]) { const v = V[id][k]; if (String(v.fv_subvisa) !== '-2') s[k] = { sub: v.fv_subvisa, date: v.fv_date, com: v.comment || '', par: [v.sender_firestname, v.sender_lastname].filter(Boolean).join(' '), titre: v.titleVisa || '', chrono: v.numChronoVisa || '' }; } vu[id] = s; }
-          return { status: 200, total: o.total, n: F.length, fichiers: F.map(f => ({ item_id: f.item_id, entete_nom: f.entete_nom, entete_oldName: f.entete_oldName, files_desc: f.files_desc, files_date: f.files_date, files_size: f.files_size, circuit: f.circuit, createby: f.createby, user_email: f.user_email, entete_archive: f.entete_archive, files_nbrev: f.files_nbrev, fcat_chemin: f.fcat_chemin, entete_version: f.entete_version })), visas: vu };
-        }, { url: dernier.url, hdr, corps: JSON.stringify(body) });
-        if (res.status !== 200) { note('Tranche ' + skip + ' : HTTP ' + res.status + ' ' + (res.err || '')); if (!fichiers.length) throw new Error('service refusé (' + res.status + ')'); break; }
-        totalApi = +res.total || totalApi; fichiers.push(...res.fichiers); Object.assign(visasUtiles, res.visas);
-        if (skip === 0 || (skip / TAKE) % 10 === 0) note('Tranche ' + skip + ' : ' + res.n + ' fichiers (total annoncé ' + res.total + ')');
-        if (res.n < TAKE || (totalApi && fichiers.length >= totalApi)) break;
+          for (const id in V) { const s = {}; for (const k in V[id]) { const v = V[id][k]; if (String(v.fv_subvisa) !== '-2') s[k] = v; } vu[id] = s; }
+          return { status: 200, total: o.total, n: F.length, data: { fichiers: F, visas: vu, total: o.total } };
+        }, { url: dernier.url, hdr, body, cookieTok: ck ? ck.value : null });
+        if (res.status !== 200) { note('Tranche ' + skip + ' : HTTP ' + res.status + ' ' + (res.err || '') + ' (jeton page : ' + res.tok + ')'); break; }
+        ok = true; const n = reduire(res.data);
+        if (skip === 0 || (skip / TAKE) % 10 === 0) note('Tranche ' + skip + ' : ' + n + ' fichiers (total annoncé ' + res.total + ')');
+        if (n < TAKE || (totalService && collecte.size >= totalService)) break;
       }
-      note('Service de données : ' + fichiers.length + ' fichiers lus sur ' + totalApi);
-      if (fichiers.length) viaApi = { fichiers, visas: visasUtiles, total: totalApi };
-    } catch (e) { note('Service de données : ' + e.message + ' — repli sur la lecture écran'); }
-    const t0 = (await texte()) + ' ';
-    let total = parseInt((t0.match(/de (\d+) Fichiers/) || [0, 0])[1]) || 0;
-    if (!total) { for (const fr of page.frames()) { const m = (await fr.evaluate(() => document.body ? document.body.innerText : '').catch(() => '')).replace(/\s+/g, ' ').match(/de (\d+) Fichiers/); if (m) { total = +m[1]; break; } } }
+      if (!ok) {
+        /* Repli : parcourir les pages à l'écran ; chaque page déclenche un appel getFilesFromCat que l'on réduit au vol */
+        note('Repli : pagination à l\'écran sur ' + nbPages + ' pages');
+        for (let pg = 2; pg <= nbPages && pg <= 400; pg++) {
+          const avant = collecte.size; let clique = false;
+          for (const fr of page.frames()) {
+            const cand = fr.locator('a, li, span, button').filter({ hasText: new RegExp('^\\s*' + pg + '\\s*$') });
+            const n = Math.min(await cand.count().catch(() => 0), 20);
+            for (let i = n - 1; i >= 0; i--) { const l = cand.nth(i); const bb = await l.boundingBox().catch(() => null); if (bb && bb.y > 700 && await l.isVisible().catch(() => false)) { await l.click({ timeout: 5000 }).catch(() => {}); clique = true; break; } }
+            if (clique) break;
+          }
+          if (!clique) { note('Page ' + pg + ' : bouton introuvable — arrêt'); break; }
+          for (let w = 0; w < 40 && collecte.size === avant; w++) await page.waitForTimeout(500);
+          await attendreLoader();
+          if (pg % 10 === 0) note('Page ' + pg + '/' + nbPages + ' : cumul ' + collecte.size);
+          if (collecte.size === avant) note('Page ' + pg + ' : aucune nouvelle donnée');
+        }
+      }
+    } catch (e) { note('Service de données : ' + e.message); }
+    note('Collecte : ' + collecte.size + ' fichiers (total service ' + totalService + ')');
+    if (collecte.size) { const fichiers = [...collecte.values()]; const visas = {}; fichiers.forEach(f => { visas[f.item_id] = f.visas; }); viaApi = { fichiers, visas, total: totalService || total }; }
     if (viaApi) {
       /* Circuits de visa : libellé et liste des avis possibles de chaque étape (réponse init.getTabs captée) */
       const circuits = {}; const nomsCircuits = {};
