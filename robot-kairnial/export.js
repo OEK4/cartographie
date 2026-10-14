@@ -246,8 +246,8 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
         const cheminF = String(f.fcat_chemin || ''); const phaseM = cheminF.match(/0[0-4]\s*-?\s*(R[ÉE]F[ÉE]RENCE|MARCH[ÉE]|APS|APD|EXE)/i);
         const phaseDossier = phaseM ? phaseM[1].toUpperCase().replace(/[ÉE]/g, 'E').replace('REFERENCE', 'REF') : '';
         const circ = circuits[String(f.circuit)] || {}; const vs = viaApi.visas[f.item_id] || {};
-        const visas = Object.keys(vs).map(k => { const v = vs[k], st = circ[k] || {}, lab = st.label || ('Étape ' + k); const s = String(v.sub); const sv = s === '-1' ? null : (st.subs || []).find(x => String(x.index) === s); const avis = s === '-1' ? 'ATT' : sv ? norm(sv.label) : 'ATT'; return { etape: +k, k: (lab.match(/^\d{2}-([A-Z]{2,5})/) || lab.match(/^([A-Z]{2,5})\b/) || ['', 'V' + k])[1], lab, lot: /^Lot \d+/.test(lab), avis, code: sv ? sv.label : (s === '-1' ? 'ATT' : s), libelle: sv ? sv.LongDesc : (s === '-1' ? 'En attente de visa' : ''), date: v.date ? new Date(+v.date * 1000).toISOString() : '', par: v.par, commentaire: v.com, titre: v.titre, chrono: v.chrono }; }).sort((a, b) => a.etape - b.etape);
-        const inter = visas.filter(v => !v.lot); const lotStep = visas.find(v => v.lot);
+        const visas = Object.keys(vs).map(k => { const v = vs[k], st = circ[k] || {}, lab = st.label || ('Étape ' + k); const s = String(v.sub); const sv = s === '-1' ? null : (st.subs || []).find(x => String(x.index) === s); const avis = s === '-1' ? 'ATT' : sv ? norm(sv.label) : 'ATT'; return { etape: +k, k: (lab.match(/^\d{2}-([A-Z]{2,5})/) || lab.match(/^([A-Z]{2,5})\b/) || ['', 'V' + k])[1], lab, lot: /^Lot \d+/.test(lab), interne: !/^Lot \d+/.test(lab) && (/BYMARO|^Étape \d+$|^_+$|^\d+$/i.test(lab) || !lab.trim()), avis, code: sv ? sv.label : (s === '-1' ? 'ATT' : s), libelle: sv ? sv.LongDesc : (s === '-1' ? 'En attente de visa' : ''), date: v.date ? new Date(+v.date * 1000).toISOString() : '', par: v.par, commentaire: v.com, titre: v.titre, chrono: v.chrono }; }).sort((a, b) => a.etape - b.etape);
+        const inter = visas.filter(v => !v.lot && !v.interne); const lotStep = visas.find(v => v.lot);
         const etat = inter.some(v => v.avis === 'REF') ? 'REF' : inter.some(v => v.avis === 'ATT') ? 'ATT' : inter.some(v => v.avis === 'VAO') ? 'VAO' : inter.some(v => v.avis === 'VSO') ? 'VSO' : 'ATT';
         const chemin = cheminF; const lotM = chemin.match(/Lot (\d+)\s*-\s*([^/]+)/i);
         out.push({ code, fichier: nom, titre: String(f.files_desc || f.entete_oldName || brut).replace(/\.[a-z0-9]{2,5}$/i, ''), nomenclature, phase: (p[1] || phaseDossier || '').toUpperCase(), lot: p[3] || (lotM ? lotM[1] : ''), lotLab: lotStep ? lotStep.lab : (lotM ? 'Lot ' + lotM[1] + ' - ' + lotM[2].trim() : ''), dossier: chemin, type: p[4] || (nomenclature ? '' : 'AUT'), bat: (p[5] || (nomenclature ? '' : 'AUT')).toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(p[9] || '00').padStart(2, '0'), emetteur: String(f.createby || ''), email: String(f.user_email || ''), date: f.files_date ? new Date(+f.files_date * 1000).toISOString() : '', depot: lotStep && lotStep.date ? lotStep.date : '', taille: +f.files_size || 0, revisions: +f.files_nbrev || 1, archive: f.entete_archive === '1', circuit: nomsCircuits[String(f.circuit)] || String(f.circuit || ''), etat, visas });
@@ -320,7 +320,9 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
       for (let tour = 0; tour < 12; tour++) { const on = (await cases()).filter(c => c.on); for (const c of on) { await page.mouse.click(c.x, c.y); await page.waitForTimeout(100); } await page.mouse.wheel(0, 700); await page.waitForTimeout(400); if (!(await cases()).some(c => c.on) && tour > 0) break; }
       await page.mouse.wheel(0, -20000); await page.waitForTimeout(400);
     };
+    const debutEcran = Date.now();
     for (let pg = 1; pg <= nbPages && pg <= 400; pg++) {
+      if (Date.now() - debutEcran > 25 * 60000) { note('Lecture écran arrêtée après 25 min à la page ' + pg); break; }
       if (pg > 1) {
         let ok = false;
         for (const fr of page.frames()) {
@@ -357,11 +359,12 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
       const [dd, mm, yy] = (r.date || '').split('/');
       out.push({ code, fichier: r.fichier, titre: r.desc || brut, phase: (p[1] || '').toUpperCase(), lot: p[3] || (lotB ? (lotB.t.match(/\d+/) || [''])[0] : ''), type: p[4] || '', bat: (p[5] || '').toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(p[9] || '00').padStart(2, '0'), emetteur: r.emetteur, date: yy ? new Date(+yy, +mm - 1, +dd).toISOString() : '', lotLab: lotB ? lotB.t : '', lotAvis: lotB ? avisCouleur(lotB.bg, lotB.fg) : '', visas, historique: histo[code] || [] });
     }
+    if (total && out.length < total * 0.9) { note('Lecture écran incomplète : ' + out.length + ' / ' + total + ' — kairnial.json conservé tel quel'); throw new Error('Lecture écran incomplète (' + out.length + ' / ' + total + ')'); }
     fs.writeFileSync(path.join(__dirname, '..', 'kairnial.json'), JSON.stringify({ ok: true, date: new Date().toISOString(), total, colonnesRapport, docs: out }));
     console.log(out.length + ' documents lus');
   } catch (e) {
     await page.screenshot({ path: path.join(CAP, '99-erreur.png') }).catch(() => {});
     note('ÉCHEC : ' + e.message);
     console.error('Échec : ' + e.message); process.exitCode = 1;
-  } finally { note('API captées (fin) : ' + JSON.stringify(api)); fs.writeFileSync(path.join(CAP, 'journal.txt'), journal.join('\n')); await browser.close(); }
+  } finally { note('API captées (fin) : ' + JSON.stringify(api)); fs.writeFileSync(path.join(CAP, 'journal.txt'), journal.join('\n')); try { fs.writeFileSync(path.join(__dirname, '..', 'robot-journal.txt'), journal.join('\n')); } catch (e) {} await browser.close(); }
 })();
