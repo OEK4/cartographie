@@ -14,7 +14,7 @@ var APPS = {
   saisie: { nom: "Pointage chantier", sig: "pointage chantier", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Saisie%20terrain%20-%20NHM.html" },
   carto:  { nom: "Suivi CET", sig: "cartographie", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/index.html" },
   resultats: { nom: "Résultats", sig: "résultats", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Resultats%20-%20NHM.html" },
-  appro: { nom: "Suivi approvisionnement", sig: "approvisionnement", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Suivi%20approvisionnement.html" },
+  appro: { nom: "Approvisionnement", sig: "approvisionnement", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Suivi%20approvisionnement.html" },
   vue3d: { nom: "Vue 3D", sig: "vue 3d", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Vue%203D.html" },
   docs: { nom: "Documents Kairnial", sig: "documents kairnial", src: "https://raw.githubusercontent.com/OEK4/cartographie/main/Documents%20Kairnial.html" }
 };
@@ -260,7 +260,7 @@ button.v3d:hover .go{transform:translateX(5px);}
           <div class="fl">&#8594;</div>
         </button>
         <button class="app" style="--c:#9B7BD4" onclick="ouvrir('appro')">
-          <div class="t">Suivi approvisionnement</div>
+          <div class="t">Approvisionnement</div>
           <div class="fl">&#8594;</div>
         </button>
       </div>
@@ -373,10 +373,10 @@ document.getElementById('v2').textContent = VERSION;
 function finSplash() {
   var sp = document.getElementById('splash');
   if (!sp || sp.className === 'off') return;
-  loginSi();
+  var L = document.getElementById('login'); L.style.transition = 'none'; loginSi(); if (!sessLire()) L.style.background = 'rgba(11,17,14,.97)';
   sp.className = 'off';
   try { APPWIN.grand(); } catch (e) {}
-  setTimeout(function () { sp.style.display = 'none'; }, 750);
+  setTimeout(function () { sp.style.display = 'none'; L.style.transition = 'background .6s'; L.style.background = ''; }, 750);
 }
 (function () {
   var b = document.querySelector('#spB i'), ini = document.getElementById('init'), pc = document.getElementById('pct');
