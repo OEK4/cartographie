@@ -2,7 +2,7 @@ name: Kairnial → kairnial.json
 
 on:
   schedule:
-    - cron: '*/15 * * * *'      # toutes les 15 min (UTC)
+    - cron: '17 */3 * * *'      # filet de sécurité GitHub (toutes les 3 h) ; le vrai rythme 15 min vient du déclencheur Apps Script
   workflow_dispatch:         # bouton "Run workflow" pour lancer à la main
 
 permissions:
