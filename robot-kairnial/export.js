@@ -53,7 +53,13 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
   try {
     /* 1. Connexion — Kairnial affiche un écran "Veuillez patienter" puis la page de connexion.
        Le champ mot de passe peut n'apparaître qu'après la saisie de l'identifiant : on tape lentement, on attend, puis on clique "Connexion" si besoin. */
-    await page.goto(KURL, { waitUntil: 'domcontentloaded' });
+    /* Kairnial peut être lent ou indisponible : 3 tentatives de 90 s, 60 s de pause entre deux */
+    let ouvert = false;
+    for (let essai = 1; essai <= 3 && !ouvert; essai++) {
+      try { await page.goto(KURL, { waitUntil: 'domcontentloaded', timeout: 90000 }); ouvert = true; }
+      catch (e) { note('Kairnial injoignable (essai ' + essai + '/3) : ' + e.message.split('\n')[0]); if (essai < 3) await page.waitForTimeout(60000); }
+    }
+    if (!ouvert) throw new Error('Kairnial injoignable après 3 tentatives (plateforme indisponible ou très lente) — kairnial.json conservé');
     await attendreLoader();
     const SEL_USER = ['input[placeholder*="Identifiant" i]', '#username', 'input[name="username"]', 'input[type="email"]', 'input[name*="login" i]', 'input[name*="user" i]', 'input[placeholder*="mail" i]', 'form input[type="text"]'];
     const SEL_PWD = ['#password', 'input[name="password"]', 'input[type="password"]'];
@@ -92,7 +98,7 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     note('Après connexion : ' + ou() + ' | ' + await texte());
     await page.screenshot({ path: path.join(CAP, '04-apres-connexion.png') });
     if (await bouton(page, 'input[type="password"]')) throw new Error('Connexion refusée (identifiant ou mot de passe) — voir 04-apres-connexion.png');
-    if (!/rfiles/.test(page.url())) { await page.goto(KURL, { waitUntil: 'domcontentloaded' }); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(4000); }
+    if (!/rfiles/.test(page.url())) { await page.goto(KURL, { waitUntil: 'domcontentloaded', timeout: 90000 }); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(4000); }
 
     /* 2. Projet HMIMV puis liste des fichiers (si l'URL n'y mène pas déjà) */
     await page.screenshot({ path: path.join(CAP, '05-accueil.png') });
@@ -112,7 +118,7 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     if (!(await listeOK())) {
       /* Changer d'adresse ne suffit pas : rechargement complet sur la liste des fichiers */
       note('Rechargement complet sur la liste des fichiers');
-      await page.goto(KURL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.goto(KURL, { waitUntil: 'domcontentloaded', timeout: 90000 }).catch(() => {});
       await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
       await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(5000);
       await page.screenshot({ path: path.join(CAP, '06a-apres-rechargement.png') }).catch(() => {});
