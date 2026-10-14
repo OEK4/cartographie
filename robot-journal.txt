@@ -1,5 +1,30 @@
-11:49:13 ÉCHEC : page.goto: Timeout 30000ms exceeded.
-Call log:
-  - navigating to "https://front-eu-1.kairnial.com/#!/rfiles/list", waiting until "domcontentloaded"
-
-11:49:13 API captées (fin) : []
+11:53:33 Page de connexion : front-eu-1.kairnial.com/#!/rfiles/list | champ identifiant = input[placeholder*="Identifiant" i] |  Veuillez patienter Erreur Succès Info Projet Langue Français English English Australian Español Deutsch Čeština Polski 繁體中文 簡體中文 Numéro de version 2026.06.1-0 Préférences utilisateur Utilisateur Déconnexion Connectez-vous à votre compte Connexion CS DE EN ES FR 簡體中文 繁體中文 Une nouvelle approche de l’exécution sur chantier et de la coordination BIM TP INNOVATION SERIES | Webinaire de lancement Enreg
+11:53:37 Identifiant saisi : ok
+11:53:47 Bouton Connexion cliqué, attente du champ mot de passe
+11:53:51 attente 1 : front-eu-1.kairnial.com/#!/rfiles/list |  Veuillez patienter Erreur Succès Info Projet Langue Français English English Australian Español Deutsch Čeština Polski 繁體中文 簡體中文 Numéro de version 2026.06.1-0 Préférences utilisateur Utilisateur Déconnexion Connectez-vous à votre compte Mot de passe oublié Connexion Annuler CS DE EN ES FR 簡體中文 繁體中文 Une nouvelle approche de l’exécution sur chantier et de la coordination BIM TP INNOVATION SERIES | 
+11:54:56 Après connexion : front-eu-1.kairnial.com/#!/rfiles/list |  Veuillez patienter Erreur Succès Info Projet Langue Français English English Australian Español Deutsch Čeština Polski 繁體中文 簡體中文 Numéro de version 2026.06.1-0 Préférences utilisateur Utilisateur Déconnexion Bienvenue Omar EL KOJJI HMIMV RABAT 1 CS DE EN ES FR 簡體中文 繁體中文 Éditer votre profil Activer la double authentification Une nouvelle approche de l’exécution sur chantier et de la coordination BI
+11:54:57 Projet trouvé : HMIMV RABAT
+11:55:12 Après choix du projet : front-eu-1.kairnial.com/#!/home |  Accueil Documents Contacts Accueil Omar EL KOJJI oelkojji@gmail.com HMIMV RABAT HMIMV RABAT 
+11:55:12 Rechargement complet sur la liste des fichiers
+11:55:31 DIAG après rechargement : {"u":"https://front-eu-1.kairnial.com/#!/rfiles/list","inputs":3,"boutons":15890,"shadow":0,"texte":"Accueil Documents Contacts Documents Dossiers Statistiques Fichiers prévisionnels Omar EL KOJJI oelkojji@gmail.com HMIMV"} ## {"u":"about:blank","inputs":0,"boutons":0,"shadow":0,"texte":""}
+11:55:32 Clic sur Documents (A )
+11:56:37 DIAG après clic Documents : {"u":"https://front-eu-1.kairnial.com/#!/rfiles/list","inputs":3,"boutons":15890,"shadow":0,"texte":"Accueil Documents Contacts Documents Dossiers Statistiques Fichiers prévisionnels Omar EL KOJJI oelkojji@gmail.com HMIMV"} ## {"u":"about:blank","inputs":0,"boutons":0,"shadow":0,"texte":""}
+11:56:40 Liste des documents : front-eu-1.kairnial.com/#!/rfiles/list |  Accueil Documents Contacts Documents Dossiers Statistiques Fichiers prévisionnels Omar EL KOJJI oelkojji@gmail.com HMIMV RABAT Derniers items Mes fichiers 00 - RÉFÉRENCE 01 - MARCHÉ 02 - APS 03 - APD 04- EXE ET 1 jour 7 jours 15 jours Nom Date Taille HMIMV-EXE-BYM-220-PLN-ISS-TZ-TNX-1060-00.pdf 736.3 kB [HMIMV-EXE-BYM-220-PLN-ISS-TZ-TNX-1060-00-PLAN REPERAGE FAUX PLANCHER DATA CENTER.pdf] dwg ABD
+11:56:40 DIAG liste : {"u":"https://front-eu-1.kairnial.com/#!/rfiles/list","inputs":3,"boutons":15890,"shadow":0,"texte":"Accueil Documents Contacts Documents Dossiers Statistiques Fichiers prévisionnels Omar EL KOJJI oelkojji@gmail.com HMIMV"} ## {"u":"about:blank","inputs":0,"boutons":0,"shadow":0,"texte":""}
+11:56:40 API captées : []
+11:56:40 Options de pagination : 10=10 20=20 30=30 40=40 50=50
+11:56:46 Pagination réglée sur 50 |  Accueil Documents Contacts Documents Dossiers Statistiques Fichiers prévisionnels Omar EL KOJJI oelkojji@gmail.com HMIMV RABAT Derniers items Mes fichiers 00 - RÉFÉRENCE 01 - MARCHÉ 02 - APS 03 - APD 04- EXE ET 1 jour 7 jours 15 jours Nom Date Taille HMIMV-EXE-BYM-220-PLN-ISS-TZ-TNX-1060-00.pdf 736.3 kB [HMIMV-EXE-BYM-220-PLN-ISS-TZ-TNX-1060-00-PLAN REPERAGE FAUX PLANCHER DATA CENTER.pdf] dwg ABD
+11:56:46 Total 4067 fichiers, 50 par page, 82 pages ; déjà collectés : 0
+11:56:46 Service de données : aucun appel getFilesFromCat capté
+11:56:46 Repli : pagination à l'écran sur 82 pages
+11:56:47 Page 2 : bouton introuvable — arrêt
+11:56:47 Collecte : 0 fichiers (total service 0)
+11:56:47 Boutons : cases={"x":540,"y":83,"w":39,"h":32,"t":"Sélectionner tous les éléments de la page"} excel={"x":540,"y":121,"w":39,"h":32,"t":"Visas multiples"}
+11:56:48 Page 1/82 : 46 lignes, cumul 46
+11:56:50 Page 1 : aucune case à cocher visible
+11:56:50 Page 2 : bouton de pagination introuvable — arrêt
+11:56:50 Rapports téléchargés : 0, documents avec historique : 0
+11:56:50 Lecture terminée : 46 documents
+11:56:50 Lecture écran incomplète : 46 / 4067 — kairnial.json conservé tel quel
+11:56:50 ÉCHEC : Lecture écran incomplète (46 / 4067)
+11:56:50 API captées (fin) : []
