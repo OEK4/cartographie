@@ -43,7 +43,13 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
   /* Écoute des réponses du serveur : la liste des documents arrive en JSON — on garde celles qui contiennent des codes HMIMV */
   const api = []; let nApi = 0; const appels = []; const defs = []; let circuitsDef = null; const collecte = new Map(); let totalService = 0;
   const reduire = (o) => { const F = o.fichiers || []; const V = o.visas || {}; totalService = +o.total || totalService; for (const f of F) { const s = {}; const vv = V[f.item_id] || {}; for (const k in vv) { const v = vv[k]; if (v.sub !== undefined) { s[k] = v; continue; } if (String(v.fv_subvisa) !== '-2') s[k] = { sub: v.fv_subvisa, date: v.fv_date, com: v.comment || '', par: [v.sender_firestname, v.sender_lastname].filter(Boolean).join(' '), titre: v.titleVisa || '', chrono: v.numChronoVisa || '' }; } collecte.set(String(f.item_id), { item_id: f.item_id, entete_nom: f.entete_nom, entete_oldName: f.entete_oldName, files_desc: f.files_desc, files_date: f.files_date, files_size: f.files_size, circuit: f.circuit, createby: f.createby, user_email: f.user_email, entete_archive: f.entete_archive, files_nbrev: f.files_nbrev, fcat_chemin: f.fcat_chemin, visas: s }); } return F.length; };
-  ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (/image|font|css|javascript|octet/i.test(ct)) return; const t = await rep.text(); if (!/HMIMV-/.test(t)) return; const u = rep.url(); const req = rep.request(); const postFull = req.postData() || ''; const post = postFull.slice(0, 300); if (/getFilesFromCat/.test(u)) { appels.push({ url: u, post: postFull, headers: req.headers() }); try { reduire(JSON.parse(t)); } catch (e) {} } api.push({ url: u.replace(/\?.*/, '').slice(0, 160), ct: ct.slice(0, 40), method: req.method(), post, taille: t.length, nb: (t.match(/HMIMV-/g) || []).length }); if (nApi < 3) { nApi++; fs.writeFileSync(path.join(CAP, 'api-' + nApi + '.json'), t.slice(0, 400000)); } } catch (e) {} });
+  const toutes = []; // toutes les requêtes POST/JSON vues (diagnostic)
+  ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (/image|font|css|javascript/i.test(ct)) return; const u = rep.url(); const req = rep.request(); const postFull = req.postData() || ''; const post = postFull.slice(0, 300);
+    if (req.method() === 'POST' && toutes.length < 400) toutes.push(u.replace(/\?.*/, '').slice(-90) + ' ' + post.slice(0, 120).replace(/\s+/g, ' '));
+    let t = ''; try { t = await rep.text(); } catch (e) { t = ''; }
+    const estFichiers = /getFilesFromCat|fichiers\.(getFiles|list|search)|files\.(get|list|search)/i.test(u + ' ' + post);
+    if (estFichiers) { appels.push({ url: u, post: postFull, headers: req.headers() }); try { reduire(JSON.parse(t)); } catch (e) {} if (!/HMIMV-/.test(t) && appels.length <= 2) fs.writeFileSync(path.join(CAP, 'appel-fichiers-' + appels.length + '.txt'), (u + '\n' + post + '\n---\n' + t.slice(0, 200000))); }
+    if (!/HMIMV-/.test(t)) return; api.push({ url: u.replace(/\?.*/, '').slice(0, 160), ct: ct.slice(0, 40), method: req.method(), post, taille: t.length, nb: (t.match(/HMIMV-/g) || []).length }); if (nApi < 3) { nApi++; fs.writeFileSync(path.join(CAP, 'api-' + nApi + '.json'), t.slice(0, 400000)); } } catch (e) {} });
   ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (!/json/i.test(ct)) return; const t = await rep.text(); if (/"circuitsContent"/.test(t) && !circuitsDef) { circuitsDef = t; fs.writeFileSync(path.join(CAP, 'circuits.json'), t.slice(0, 3000000)); } if (/SOCOTEC|Bureau Contr/i.test(t) && !/getFilesFromCat/.test(rep.url()) && defs.length < 4) { defs.push({ url: rep.url().replace(/\?.*/, '').slice(0, 160), text: t }); fs.writeFileSync(path.join(CAP, 'def-' + defs.length + '.json'), t.slice(0, 2000000)); } } catch (e) {} });
   ctx.on('page', async p => { try { await p.waitForLoadState('domcontentloaded'); page = p; note('Nouvel onglet : ' + p.url().slice(0, 60)); } catch (e) {} });
   /* Adresse sans paramètres (pas de jeton dans le journal) */
@@ -186,10 +192,27 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     const parPage = parseInt((t0.match(/1 - (\d+) de/) || [0, 50])[1]) || 50;
     const nbPages = total ? Math.ceil(total / parPage) : 1;
     note('Total ' + total + ' fichiers, ' + parPage + ' par page, ' + nbPages + ' pages ; déjà collectés : ' + collecte.size);
+    /* Clic sur le numéro de page dans le pied de liste : on cherche dans tous les cadres, sans contrainte de position, et on force le clic si l'élément est masqué par le défilement */
+    const allerPage = async (pg) => {
+      for (const fr of page.frames()) {
+        const hit = await fr.evaluate((pg) => {
+          const want = String(pg); const els = [...document.querySelectorAll('a, li, span, button, div')].filter(e => e.children.length === 0 && e.textContent.trim() === want);
+          // préférer un élément situé dans un conteneur de pagination (voisins numériques)
+          const score = e => { const p = e.parentElement && e.parentElement.parentElement; if (!p) return 0; const t = p.textContent || ''; return (t.match(/\b\d{1,3}\b/g) || []).length; };
+          els.sort((a, b) => score(b) - score(a)); const e = els[0]; if (!e) return null;
+          e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height, n: els.length, s: score(e) };
+        }, pg).catch(() => null);
+        if (hit && hit.w > 0 && hit.s >= 2) { await page.mouse.click(hit.x, hit.y).catch(() => {}); return true; }
+      }
+      // dernier recours : bouton "page suivante"
+      const nxt = await bouton(page, '[title*="suivant" i], [aria-label*="next" i], .k-i-arrow-e, .k-pager-nav:not(.k-pager-first):not(.k-pager-last) span.k-i-arrow-60-right, a.k-link[title*="next" i]');
+      if (nxt) { await nxt.click({ force: true, timeout: 3000 }).catch(() => {}); return true; }
+      return false;
+    };
     const TAKE = 100; let ok = false;
     try {
       const dernier = appels[appels.length - 1];
-      if (!dernier) throw new Error('aucun appel getFilesFromCat capté');
+      if (!dernier) { note('Requêtes POST vues (' + toutes.length + ') : ' + toutes.slice(0, 60).join(' || ')); throw new Error('aucun appel de liste de fichiers capté'); }
       fs.writeFileSync(path.join(CAP, 'appel-post.json'), dernier.post.slice(0, 20000));
       const body = JSON.parse(dernier.post); const P = body.params[0];
       const hdr = {}; for (const k in dernier.headers) if (/^(content-type|accept|x-xsrf-token|x-csrf-token|authorization|userhash|machineid)$/i.test(k)) hdr[k] = dernier.headers[k];
@@ -218,16 +241,11 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     if (!ok || (totalService && collecte.size < totalService)) {
       try {
         /* Repli : parcourir les pages à l'écran ; chaque page déclenche un appel getFilesFromCat que l'on réduit au vol */
-        note('Repli : pagination à l\'écran sur ' + nbPages + ' pages');
+        note('Repli : pagination à l\'écran sur ' + nbPages + ' pages'); const t0Repli = Date.now();
         const debutPg = Math.max(2, Math.floor(collecte.size / parPage) + 1);
         for (let pg = debutPg; pg <= nbPages && pg <= 400; pg++) {
-          const avant = collecte.size; let clique = false;
-          for (const fr of page.frames()) {
-            const cand = fr.locator('a, li, span, button').filter({ hasText: new RegExp('^\\s*' + pg + '\\s*$') });
-            const n = Math.min(await cand.count().catch(() => 0), 20);
-            for (let i = n - 1; i >= 0; i--) { const l = cand.nth(i); const bb = await l.boundingBox().catch(() => null); if (bb && bb.y > 700 && await l.isVisible().catch(() => false)) { await l.click({ timeout: 5000 }).catch(() => {}); clique = true; break; } }
-            if (clique) break;
-          }
+          if (Date.now() - t0Repli > 25 * 60000) { note('Repli arrêté après 25 min'); break; }
+          const avant = collecte.size; const clique = await allerPage(pg);
           if (!clique) { note('Page ' + pg + ' : bouton introuvable — arrêt'); break; }
           for (let w = 0; w < 40 && collecte.size === avant; w++) await page.waitForTimeout(500);
           await attendreLoader();
@@ -330,13 +348,7 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     for (let pg = 1; pg <= nbPages && pg <= 400; pg++) {
       if (Date.now() - debutEcran > 25 * 60000) { note('Lecture écran arrêtée après 25 min à la page ' + pg); break; }
       if (pg > 1) {
-        let ok = false;
-        for (const fr of page.frames()) {
-          const cand = fr.locator('a, li, span, button').filter({ hasText: new RegExp('^\\s*' + pg + '\\s*$') });
-          const n = Math.min(await cand.count().catch(() => 0), 20);
-          for (let i = n - 1; i >= 0; i--) { const l = cand.nth(i); const bb = await l.boundingBox().catch(() => null); if (bb && bb.y > 700 && await l.isVisible().catch(() => false)) { await l.click({ timeout: 5000 }).catch(() => {}); ok = true; break; } }
-          if (ok) break;
-        }
+        const ok = await allerPage(pg);
         if (!ok) { note('Page ' + pg + ' : bouton de pagination introuvable — arrêt'); break; }
         await page.waitForTimeout(2500); await attendreLoader();
         const attendu = ((pg - 1) * parPage + 1) + ' - ';
