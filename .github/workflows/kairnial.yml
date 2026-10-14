@@ -2,7 +2,7 @@ name: Kairnial → kairnial.json
 
 on:
   schedule:
-    - cron: '*/15 * * * *'      # toutes les 15 minutes (UTC)
+    - cron: '*/15 * * * *'      # toutes les 15 min (UTC)
   workflow_dispatch:         # bouton "Run workflow" pour lancer à la main
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   export:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 40          # au-delà, le robot est coupé : un résultat partiel n'écrase jamais kairnial.json
     steps:
       - uses: actions/checkout@v4
 
@@ -38,10 +38,11 @@ jobs:
         run: node robot-kairnial/export.js
 
       - name: Publier kairnial.json
+        if: always()
         run: |
           git config user.name "robot-kairnial"
           git config user.email "robot@users.noreply.github.com"
-          git add kairnial.json
+          git add kairnial.json robot-journal.txt
           git diff --cached --quiet && echo "Aucun changement" && exit 0
           git commit -m "Kairnial : états des documents $(date -u +'%Y-%m-%d %H:%M UTC')"
           git push
