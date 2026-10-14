@@ -1,0 +1,5 @@
+11:49:13 ÉCHEC : page.goto: Timeout 30000ms exceeded.
+Call log:
+  - navigating to "https://front-eu-1.kairnial.com/#!/rfiles/list", waiting until "domcontentloaded"
+
+11:49:13 API captées (fin) : []
