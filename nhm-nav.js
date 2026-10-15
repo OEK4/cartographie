@@ -16,6 +16,7 @@
     '.b{display:flex;align-items:center;gap:6px;height:38px;padding:0 10px 0 6px;background:#1F2620;color:#F2F1ED;box-shadow:0 2px 10px rgba(0,0,0,.25);}' +
     '.m{display:flex;align-items:center;gap:8px;padding:0 10px 0 6px;height:28px;border-radius:8px;text-decoration:none;color:#F2F1ED;font-weight:800;font-size:13px;letter-spacing:.4px;font-family:Archivo,"Archivo Narrow",Arial,sans-serif;}' +
     '.m:hover{background:rgba(255,255,255,.1);}.m i{flex:none;display:flex;align-items:center;justify-content:center;height:22px;padding:0 6px;border-radius:6px;background:#E8632B;color:#fff;font-style:normal;font-size:10.5px;font-weight:800;letter-spacing:.3px;line-height:1;}' +
+    '.m span{font-family:"Archivo Narrow",Arial,sans-serif;font-size:12.5px;font-weight:500;letter-spacing:.8px;color:#D9D6CF;}.m:hover span{color:#FFFFFF;}' +
     '.sep{width:1px;height:20px;background:rgba(255,255,255,.18);margin:0 2px;}' +
     '.lg{display:flex;align-items:center;gap:8px;padding:0 6px;}.lg img{display:block;height:22px;width:auto;}.lg .by{height:22px;padding:0 9px;border-radius:11px;background:#E8632B;color:#fff;font-family:Archivo,"Archivo Narrow",Arial,sans-serif;font-size:10.5px;font-weight:800;letter-spacing:.6px;display:flex;align-items:center;}' +
     'nav{display:flex;gap:2px;}' +
@@ -78,7 +79,7 @@
       var r = this.attachShadow({ mode: 'open' });
       var app = this.getAttribute('app') || '';
       r.innerHTML = '<style>' + CSS + '</style><div class="b">' +
-        '<a class="m" href="app.html" title="Lanceur"><i>NHM</i><span>HMIMV</span></a>' +
+        '<a class="m" href="app.html#accueil" target="_top" title="Retour \u00e0 l\u2019accueil"><i>NHM</i><span>Accueil</span></a>' +
         '<nav>' + APPS.map(function (a) { return '<a href="' + a.href + '" class="' + (a.k === app ? 'on' : '') + '" style="--c:' + a.c + '" title="' + a.lab + '"><b></b><span>' + a.lab + '</span></a>'; }).join('') + '</nav>' +
         '<div class="sp"></div><a class="st" id="st" href="Saisie terrain - NHM.html" title="Synchronisation"><i></i><span class="l"></span></a>' +
         '<div class="usr" id="usr"><button id="ub" title="Mon compte"><span class="av" id="av"></span><span class="nm"><b id="un"></b><i id="ur"></i></span></button>' +
