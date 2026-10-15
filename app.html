@@ -102,8 +102,8 @@ button.docs:hover{transform:translateY(-3px);box-shadow:0 14px 30px rgba(31,38,3
 button.docs .ic{flex:none;width:46px;height:46px;border-radius:11px;background:#F1ECFA;color:#9B7BD4;display:flex;align-items:center;justify-content:center;}
 button.docs .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
 button.docs .t1{font-family:'Archivo','Segoe UI',Arial,sans-serif;font-size:18px;font-weight:800;color:#1F2620;letter-spacing:.2px;}
-button.docs .t2{font-size:12.5px;font-weight:600;color:#6B675F;display:flex;align-items:center;gap:6px;}
-button.docs .t2 i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#57B26B;animation:kpulse 1.8s ease-in-out infinite;}
+button.docs .t2{font-size:12.5px;font-weight:600;color:#6B675F;display:flex;align-items:center;gap:7px;white-space:nowrap;}
+button.docs .t2 i{flex:none;display:block;width:7px;height:7px;border-radius:50%;background:#57B26B;box-shadow:0 0 0 3px rgba(87,178,107,.18);animation:kpulse 1.8s ease-in-out infinite;}
 @keyframes kpulse{0%,100%{opacity:1}50%{opacity:.3}}
 button.docs .go{flex:none;font-size:20px;font-weight:700;color:#9B7BD4;transition:transform .15s;}
 button.docs:hover .go{transform:translateX(5px);}
@@ -245,7 +245,7 @@ button.v3d:hover .go{transform:translateX(5px);}
         <img src="https://lh3.googleusercontent.com/d/1J8QnlcWb8gaMKwtHaLv45TkidZjcE5da=w400" alt="" style="height:42px" onerror="this.style.display='none'">
       </div>
       <h1>Plateforme CET &middot; HMIMV</h1>
-      <div class="sous">Suivi avec votre point &middot; Corps d&rsquo;&eacute;tat techniques &middot; SSP &middot; TSG &middot; SMT &middot; CDI</div>
+      <div class="sous">Du pointage terrain &agrave; la d&eacute;cision &middot; SSP &middot; TSG &middot; SMT &middot; CDI</div>
       <div class="ver">VERSION <span id="v"></span></div>
       <div class="choix">
         <button class="app" style="--c:#E8A13C" onclick="ouvrir('saisie')">
@@ -261,7 +261,7 @@ button.v3d:hover .go{transform:translateX(5px);}
           <div class="fl">&#8594;</div>
         </button>
         <button class="app" style="--c:#9B7BD4" onclick="ouvrir('appro')">
-          <div class="t" style="font-size:17.5px;letter-spacing:-.2px;">Approvisionnement</div>
+          <div class="t" style="font-size:clamp(14px,1.45vw,17px);letter-spacing:-.3px;overflow-wrap:normal;hyphens:none;white-space:nowrap;">Approvisionnement</div>
           <div class="fl">&#8594;</div>
         </button>
       </div>
@@ -312,14 +312,14 @@ button.v3d:hover .go{transform:translateX(5px);}
       </button>
       <button class="docs" onclick="ouvrir('docs')">
         <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M14 3v6h6"></path><path d="M9 14l2 2 4-4"></path></svg></span>
-        <span class="tx"><span class="t1">DOCUMENTS</span><span class="t2"><i></i>Kairnial &middot; visas en temps r&eacute;el</span></span>
+        <span class="tx"><span class="t1">DOCUMENTS</span><span class="t2"><i></i>Kairnial &middot; temps r&eacute;el</span></span>
         <span class="go">&#8594;</span>
       </button>
       </div>
       <div id="msg"></div>
       <div class="bar" id="bar"><i></i></div>
     </div>
-    <div id="pied"><span id="who"></span></div>
+    <div id="pied"><span id="who" style="display:flex;align-items:center;gap:10px;width:100%;"></span></div>
   </div>
 </div>
 <script>
@@ -515,7 +515,7 @@ function sessMaj() {
   w.innerHTML = '';
   if (!s) { w.textContent = 'Non connecté.'; return; }
   var sp = document.createElement('span'); sp.innerHTML = 'Connecté : <b>' + s.nom + '</b> · ' + s.email + ' · ' + (s.role === 'admin' ? 'administrateur' : 'utilisateur'); w.appendChild(sp);
-  var b = document.createElement('button'); b.textContent = 'Se déconnecter'; b.onclick = deconnecter; w.appendChild(b);
+  var gap = document.createElement('span'); gap.style.flex = '1'; w.appendChild(gap); var b = document.createElement('button'); b.textContent = 'Se déconnecter'; b.onclick = deconnecter; w.appendChild(b);
 }
 function ouvrir(k) { if (!sessLire()) { loginSi(); return; } charger(k); }
 sessMaj();

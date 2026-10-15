@@ -15,7 +15,7 @@
   var CSS = ':host{display:block;position:fixed;top:0;left:0;right:0;z-index:2147483000;font-family:"Archivo Narrow",Arial,sans-serif;}' +
     '.b{display:flex;align-items:center;gap:6px;height:38px;padding:0 10px 0 6px;background:#1F2620;color:#F2F1ED;box-shadow:0 2px 10px rgba(0,0,0,.25);}' +
     '.m{display:flex;align-items:center;gap:8px;padding:0 10px 0 6px;height:28px;border-radius:8px;text-decoration:none;color:#F2F1ED;font-weight:800;font-size:13px;letter-spacing:.4px;font-family:Archivo,"Archivo Narrow",Arial,sans-serif;}' +
-    '.m:hover{background:rgba(255,255,255,.1);}.m i{display:block;width:22px;height:22px;border-radius:6px;background:#E8632B;color:#fff;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;letter-spacing:0;}' +
+    '.m:hover{background:rgba(255,255,255,.1);}.m i{flex:none;display:flex;align-items:center;justify-content:center;height:22px;padding:0 6px;border-radius:6px;background:#E8632B;color:#fff;font-style:normal;font-size:10.5px;font-weight:800;letter-spacing:.3px;line-height:1;}' +
     '.sep{width:1px;height:20px;background:rgba(255,255,255,.18);margin:0 2px;}' +
     '.lg{display:flex;align-items:center;gap:8px;padding:0 6px;}.lg img{display:block;height:22px;width:auto;}.lg .by{height:22px;padding:0 9px;border-radius:11px;background:#E8632B;color:#fff;font-family:Archivo,"Archivo Narrow",Arial,sans-serif;font-size:10.5px;font-weight:800;letter-spacing:.6px;display:flex;align-items:center;}' +
     'nav{display:flex;gap:2px;}' +
@@ -79,7 +79,6 @@
       var app = this.getAttribute('app') || '';
       r.innerHTML = '<style>' + CSS + '</style><div class="b">' +
         '<a class="m" href="app.html" title="Lanceur"><i>NHM</i><span>HMIMV</span></a>' +
-        '<div class="lg"><img src="https://lh3.googleusercontent.com/d/1p4Xu-kw1YRoCoIVvglcxlK49Qo91t7_E=w200" alt="H\u00f4pital Militaire" onerror="this.remove()"><img src="https://lh3.googleusercontent.com/d/1J8QnlcWb8gaMKwtHaLv45TkidZjcE5da=w200" alt="Bymaro" onerror="this.outerHTML=\'<span class=by>BYMARO</span>\'"></div><div class="sep"></div>' +
         '<nav>' + APPS.map(function (a) { return '<a href="' + a.href + '" class="' + (a.k === app ? 'on' : '') + '" style="--c:' + a.c + '" title="' + a.lab + '"><b></b><span>' + a.lab + '</span></a>'; }).join('') + '</nav>' +
         '<div class="sp"></div><a class="st" id="st" href="Saisie terrain - NHM.html" title="Synchronisation"><i></i><span class="l"></span></a>' +
         '<div class="usr" id="usr"><button id="ub" title="Mon compte"><span class="av" id="av"></span><span class="nm"><b id="un"></b><i id="ur"></i></span></button>' +
