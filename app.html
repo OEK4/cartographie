@@ -225,7 +225,7 @@ button.v3d:hover .go{transform:translateX(5px);}
     <h2 id="lgT">Connexion</h2>
     <div class="s" id="lgS">Votre adresse e-mail professionnelle identifie votre compte.</div>
     <div class="et" data-et="email"><label>Adresse e-mail</label><input type="email" id="lgEmail" placeholder="prenom.nom@bouygues-construction.com" autocomplete="username"></div>
-    <div class="et" data-et="pw"><label>Mot de passe</label><input type="password" id="lgPw" placeholder="Votre mot de passe" autocomplete="current-password"></div>
+    <div class="et" data-et="pw"><label>Mot de passe</label><input type="password" id="lgPw" placeholder="Votre mot de passe" autocomplete="current-password"><a href="#" id="lgOubli" onclick="lgOublie();return false;" style="align-self:flex-end;font-size:13px;font-weight:700;color:#8C6A1F;text-decoration:none;margin-top:2px;">Mot de passe oubli&eacute; ?</a></div>
     <div class="et" data-et="code"><label>Code re&ccedil;u par e-mail</label><input id="lgCode" inputmode="numeric" maxlength="6" placeholder="6 chiffres" style="letter-spacing:6px;font-size:20px;text-align:center;"><div class="s" id="lgCodeInfo"></div></div>
     <div class="et" data-et="new"><label>Nom et pr&eacute;nom</label><input id="lgNom" placeholder="Tel qu&rsquo;affich&eacute; dans la plateforme"><label>Choisir un mot de passe</label><input type="password" id="lgNew1" autocomplete="new-password" placeholder="8 caract&egrave;res minimum"><label>Confirmer</label><input type="password" id="lgNew2" autocomplete="new-password"></div>
     <div class="msg" id="lgMsg"></div>
@@ -352,11 +352,11 @@ if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
       n.addEventListener('statechange', function () {
         if (n.state === 'installed' && navigator.serviceWorker.controller) {
           var d = document.createElement('div');
-          d.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:200;background:#2C3A33;color:#fff;padding:13px 20px;border-radius:11px;box-shadow:0 10px 30px rgba(0,0,0,.4);font-family:inherit;font-size:14px;display:flex;align-items:center;gap:14px;';
+          d.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:200;background:#2C3A33;color:#fff;padding:13px 20px;border-radius:11px;box-shadow:0 10px 30px rgba(0,0,0,.4);font-family:\"Segoe UI\",Arial,sans-serif;font-size:14.5px;font-weight:600;display:flex;align-items:center;gap:14px;';
           d.innerHTML = '<span>Une nouvelle version est disponible.</span>';
           var b = document.createElement('button');
           b.textContent = 'Mettre \u00e0 jour';
-          b.style.cssText = 'border:none;border-radius:8px;padding:8px 16px;background:#E8A13C;color:#1F2620;font-weight:700;font-family:inherit;font-size:13.5px;cursor:pointer;';
+          b.style.cssText = 'border:none;border-radius:8px;padding:8px 16px;background:#E8A13C;color:#1F2620;font-weight:700;font-family:\"Segoe UI\",Arial,sans-serif;font-size:14px;cursor:pointer;';
           b.onclick = function () { n.postMessage('maj'); location.reload(); };
           d.appendChild(b);
           document.body.appendChild(d);
@@ -465,6 +465,14 @@ function lgEt(n, titre, sous, btn) {
   var f = { email: 'lgEmail', pw: 'lgPw', code: 'lgCode', new: 'lgNom' }[n]; setTimeout(function () { var el = document.getElementById(f); if (el) el.focus(); }, 60);
 }
 function lgMsg(t, ok) { var m = document.getElementById('lgMsg'); m.textContent = t; m.className = 'msg' + (ok ? ' ok' : ''); }
+async function lgOublie() {
+  var email = (lgData.email || document.getElementById('lgEmail').value).trim().toLowerCase(); if (!email) return;
+  try { var c = await api('code', { email: email }); if (!c.ok) { lgMsg(c.msg || 'Envoi impossible.'); return; }
+    lgData = { email: email, nom: lgData.nom || '', reset: true };
+    lgEt('code', 'Mot de passe oublié', 'Un code de vérification vient d’être envoyé à ' + email + '. Saisissez-le pour choisir un nouveau mot de passe.', 'Vérifier');
+    document.getElementById('lgCodeInfo').textContent = c.demo ? 'Mode local : code de démonstration ' + c.demo : 'Pensez à vérifier les courriers indésirables.';
+  } catch (e) { lgMsg('Service de comptes injoignable : vérifiez la connexion.'); }
+}
 function lgRetour() { lgEt('email', 'Connexion', 'Votre adresse e-mail professionnelle identifie votre compte.', 'Continuer'); }
 function loginSi() {
   var s = sessLire(), L = document.getElementById('login');
@@ -482,7 +490,7 @@ async function lgValider() {
     if (lgEtape === 'email') {
       var r = await api('etat', { email: email });
       if (!r.ok) { lgMsg(r.msg || 'Service indisponible.'); ok.disabled = false; return; }
-      if (r.existe) { lgData = { email: email, nom: r.nom }; lgEt('pw', 'Bonjour ' + (r.nom || '').split(' ')[0], 'Saisissez votre mot de passe personnel.', 'Se connecter'); }
+      if (r.existe) { lgData = { email: email, nom: r.nom }; lgEt('pw', 'Bonjour', 'Saisissez votre mot de passe personnel.', 'Se connecter'); }
       else { var c = await api('code', { email: email }); if (!c.ok) { lgMsg(c.msg || 'Envoi impossible.'); ok.disabled = false; return; } lgData = { email: email }; lgEt('code', 'Créer votre compte', externe ? 'Adresse hors organisation : le compte sera soumis à validation d’un administrateur. Un code de vérification vient de vous être envoyé par e-mail.' : 'Aucun compte pour cette adresse. Un code de vérification vient de vous être envoyé par e-mail.', 'Vérifier'); document.getElementById('lgCodeInfo').textContent = c.demo ? 'Mode local : code de démonstration ' + c.demo : 'Pensez à vérifier les courriers indésirables.'; }
     } else if (lgEtape === 'pw') {
       var pw = document.getElementById('lgPw').value; if (!pw) { lgMsg('Mot de passe requis.'); ok.disabled = false; return; }
@@ -492,7 +500,9 @@ async function lgValider() {
       document.getElementById('login').className = ''; sessMaj(); return;
     } else if (lgEtape === 'code') {
       var code = document.getElementById('lgCode').value.trim(); if (code.length !== 6) { lgMsg('Code à 6 chiffres.'); ok.disabled = false; return; }
-      lgData.code = code; lgEt('new', 'Finaliser le compte', 'Choisissez votre nom d’affichage et un mot de passe personnel.', 'Créer le compte');
+      lgData.code = code;
+      if (lgData.reset) { lgEt('new', 'Nouveau mot de passe', 'Choisissez un nouveau mot de passe personnel.', 'Enregistrer'); document.getElementById('lgNom').value = lgData.nom || ''; }
+      else lgEt('new', 'Finaliser le compte', 'Choisissez votre nom d’affichage et un mot de passe personnel.', 'Créer le compte');
     } else if (lgEtape === 'new') {
       var nom = document.getElementById('lgNom').value.trim(), p1 = document.getElementById('lgNew1').value, p2 = document.getElementById('lgNew2').value;
       if (nom.length < 3) { lgMsg('Indiquez votre nom et prénom.'); ok.disabled = false; return; }
@@ -508,7 +518,9 @@ async function lgValider() {
   } catch (e) { lgMsg('Service de comptes injoignable : vérifiez la connexion.'); }
   ok.disabled = false;
 }
-document.getElementById('login').addEventListener('keydown', function (e) { if (e.key === 'Enter') lgValider(); });
+/* Entrée : laisser le navigateur appliquer d'abord la suggestion d'adresse choisie (saisie automatique) */
+document.getElementById('login').addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); setTimeout(lgValider, 120); } });
+['lgEmail', 'lgPw', 'lgCode'].forEach(function (id) { var el = document.getElementById(id); if (!el) return; var clr = function () { el.className = ''; var m = document.getElementById('lgMsg'); if (m && !/ok/.test(m.className)) m.textContent = ''; }; el.addEventListener('input', clr); el.addEventListener('change', clr); });
 function sessMaj() {
   var s = sessLire(), w = document.getElementById('who');
   if (!w) return;
