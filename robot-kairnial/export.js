@@ -39,6 +39,30 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
 
 /* Pièces jointes des visas : le robot (connecté à Kairnial) les télécharge puis les dépose dans le Drive privé via Apps Script.
    Le lien de téléchargement est cherché dans l'objet visa (champs contenant une URL ou un chemin de fichier). */
+/* Les pièces jointes des visas ne sont pas dans la liste : Kairnial les charge quand on ouvre le détail d'un fichier.
+   Le robot ouvre quelques fichiers refusés commentés et note les services appelés + les réponses contenant des noms de fichiers. */
+async function decouvrirPJ(page, out) {
+  const cibles = out.filter(d => (d.visas || []).some(v => v.commentaire && /REF|VAO/.test(v.avis))).slice(0, 4);
+  if (!cibles.length) return note('Découverte PJ : aucun fichier commenté');
+  const vus = [];
+  const ecoute = async rep => { try { const u = rep.url(); if (!/ws-[a-z0-9-]+\.kairnial\.com/.test(u) || /getFilesFromCat/.test(u)) return; const post = rep.request().postData() || ''; const svc = ((post.match(/"service":"([^"]+)"/) || [])[1] || u.split('/').pop()).replace(/^rgoc_\d+_[0-9a-f-]+\./, ''); const t = await rep.text().catch(() => ''); const f = (t.match(/[^"\\/]{3,160}\.(pdf|dwg|docx?|xlsx?|zip)/gi) || []).filter(x => !/^HMIMV-/.test(x)); vus.push({ svc, taille: t.length, fichiers: f.slice(0, 5), url: u.replace(/\?.*/, ''), post: post.slice(0, 1500), extrait: t.slice(0, 3000) }); } catch (e) {} };
+  page.on('response', ecoute);
+  for (const d of cibles) {
+    try {
+      const champ = page.locator('input[placeholder*="Recherche" i]').first();
+      await champ.fill(''); await champ.fill(d.code); await champ.press('Enter'); await page.waitForTimeout(5000);
+      const ligne = page.locator('text=' + (d.fichier || d.code)).first();
+      if (await ligne.count()) { await ligne.click({ timeout: 8000 }).catch(() => {}); await page.waitForTimeout(7000); }
+      await page.screenshot({ path: path.join(CAP, 'detail-' + d.code.slice(-12) + '.png') }).catch(() => {});
+    } catch (e) { note('Découverte PJ ' + d.code + ' : ' + e.message); }
+  }
+  page.off('response', ecoute);
+  const avecF = vus.filter(v => v.fichiers.length);
+  note('Découverte PJ : ' + vus.length + ' appel(s) · services : ' + [...new Set(vus.map(v => v.svc))].join(', '));
+  avecF.slice(0, 4).forEach((v, i) => { note('Découverte PJ · ' + v.svc + ' → ' + v.fichiers.join(' ; ')); fs.writeFileSync(path.join(CAP, 'detail-' + (i + 1) + '.json'), JSON.stringify(v, null, 1)); });
+  fs.writeFileSync(path.join(__dirname, '..', 'pj-decouverte.json'), JSON.stringify(vus.map(v => ({ svc: v.svc, taille: v.taille, fichiers: v.fichiers, extrait: v.fichiers.length ? v.extrait : '' })), null, 1));
+}
+
 async function deposerPJ(out, ctx, base) {
   let idx = {}; try { idx = JSON.parse(fs.readFileSync(PJ_INDEX, 'utf8')); } catch (e) {}
   const visas = []; out.forEach(d => (d.visas || []).forEach(v => { if (v.pj && v.pj.length) visas.push([d, v]); }));
@@ -299,6 +323,7 @@ async function deposerPJ(out, ctx, base) {
         out.push({ code, fichier: nom, titre: String(f.files_desc || f.entete_oldName || brut).replace(/\.[a-z0-9]{2,5}$/i, ''), nomenclature, phase: (p[1] || phaseDossier || '').toUpperCase(), lot: p[3] || (lotM ? lotM[1] : ''), lotLab: lotStep ? lotStep.lab : (lotM ? 'Lot ' + lotM[1] + ' - ' + lotM[2].trim() : ''), dossier: chemin, type: p[4] || (nomenclature ? '' : 'AUT'), bat: (p[5] || (nomenclature ? '' : 'AUT')).toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(p[9] || '00').padStart(2, '0'), emetteur: String(f.createby || ''), email: String(f.user_email || ''), date: f.files_date ? new Date(+f.files_date * 1000).toISOString() : '', depot: lotStep && lotStep.date ? lotStep.date : '', taille: +f.files_size || 0, revisions: +f.files_nbrev || 1, archive: f.entete_archive === '1', circuit: nomsCircuits[String(f.circuit)] || String(f.circuit || ''), etat, visas });
       }
       if (!out.length) throw new Error('Service de données : aucun fichier');
+      await decouvrirPJ(page, out).catch(e => note('Découverte PJ : ' + e.message));
       await deposerPJ(out);
       note('Dont hors nomenclature HMIMV : ' + out.filter(d => !d.nomenclature).length);
       fs.writeFileSync(path.join(__dirname, '..', 'kairnial.json'), JSON.stringify({ ok: true, date: new Date().toISOString(), total: viaApi.total || total || out.length, source: 'service', docs: out }));
