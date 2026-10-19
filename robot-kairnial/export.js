@@ -90,16 +90,20 @@ async function ouvrirDoc(page, code) {
   if (!(await l.count())) return false;
   await l.click({ timeout: 8000 }); await page.waitForTimeout(6000); return true;
 }
-const nomsPJ = t => [...new Set((String(t).match(/[^"\\/<>:|*?]{3,180}\.(pdf|dwg|docx?|xlsx?|zip|jpe?g|png)\b/gi) || []).map(x => x.trim()).filter(x => !/^HMIMV-/i.test(x)))];
+const nomsPJ = t => { let s = String(t); try { s = s.replace(/\\u([0-9a-f]{4})/gi, (m, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\\//g, '/'); } catch (e) {} return [...new Set((s.match(/[\w\u00C0-\u017F][^"\\<>:|*?\n\/]{2,180}\.(pdf|dwg|docx?|xlsx?|zip|jpe?g|png)(?=["'\\\s,}\]]|$)/gi) || []).map(x => x.trim()).filter(x => !/^HMIMV-/i.test(x)))]; };
 async function recupererPJ(page, out) {
   let idx = {}; try { idx = JSON.parse(fs.readFileSync(PJ_INDEX, 'utf8')); } catch (e) {}
   const req = globalThis.__ctx.request;
   let modele = null;
-  const ecoute = rep => { try { if (modele || !/getFilesComments/.test(rep.url())) return; const q = rep.request(); modele = { url: rep.url(), post: q.postData() || '', headers: q.headers() }; } catch (e) {} };
+  const brut = [];
+  const ecoute = async rep => { try { if (!/getFilesComments|getComments|comment/i.test(rep.url())) return; const q = rep.request(); const t = await rep.text().catch(() => ''); brut.push({ url: rep.url(), post: (q.postData() || '').replace(/"UserHash":"[^"]+"/, '"UserHash":"…"'), taille: t.length, reponse: t.slice(0, 20000) }); if (!modele && t.length > 10) modele = { url: rep.url(), post: q.postData() || '', headers: q.headers() }; } catch (e) {} };
   page.on('response', ecoute);
   const okPrio = await ouvrirDoc(page, PJ_PRIO).catch(e => { note('PJ : ouverture ' + PJ_PRIO + ' : ' + e.message.slice(0, 100)); return false; });
   await page.screenshot({ path: path.join(CAP, 'pj-prio.png') }).catch(() => {});
+  await page.waitForTimeout(4000);
   page.off('response', ecoute);
+  fs.writeFileSync(path.join(__dirname, '..', 'pj-decouverte.json'), JSON.stringify({ doc: PJ_PRIO, appels: brut }, null, 1));
+  note('PJ : ' + brut.length + ' réponse(s) commentaires captée(s) pour ' + PJ_PRIO + ' · tailles ' + brut.map(b => b.taille).join(','));
   const dP = out.find(d => d.code === PJ_PRIO);
   if (!modele || !dP || !dP.item_id || modele.post.indexOf(String(dP.item_id)) < 0) { note('PJ : modèle getFilesComments ' + (modele ? 'capté mais identifiant introuvable' : 'non capté') + ' (ouverture ' + okPrio + ')'); return; }
   const H = {}; for (const k in modele.headers) if (!/^(content-length|host|cookie|:)/i.test(k)) H[k] = modele.headers[k];
@@ -114,7 +118,7 @@ async function recupererPJ(page, out) {
     } catch (e) {}
   }
   note('PJ : ' + cibles.length + ' document(s) commenté(s) interrogé(s) · ' + nb + ' pièce(s) jointe(s) trouvée(s)');
-  if (exemple) fs.writeFileSync(path.join(__dirname, '..', 'pj-decouverte.json'), JSON.stringify({ modele: { url: modele.url, post: modele.post.replace(/"UserHash":"[^"]+"/, '"UserHash":"…"') }, exemple }, null, 1));
+  if (exemple) note('PJ exemple ' + exemple.code + ' : ' + exemple.reponse.slice(0, 600).replace(/\s+/g, ' '));
   /* 3) téléchargement des nouvelles PJ → Drive */
   if (!PJ_URL) { note('PJ : dépôt Drive désactivé (secret KAIRNIAL_PJ_URL absent)'); return; }
   let dep = 0, ko = 0;
