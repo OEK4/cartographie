@@ -47,20 +47,34 @@ async function decouvrirPJ(page, out) {
   const vus = [];
   const ecoute = async rep => { try { const u = rep.url(); if (!/ws-[a-z0-9-]+\.kairnial\.com/.test(u) || /getFilesFromCat/.test(u)) return; const post = rep.request().postData() || ''; const svc = ((post.match(/"service":"([^"]+)"/) || [])[1] || u.split('/').pop()).replace(/^rgoc_\d+_[0-9a-f-]+\./, ''); const t = await rep.text().catch(() => ''); const f = (t.match(/[^"\\/]{3,160}\.(pdf|dwg|docx?|xlsx?|zip)/gi) || []).filter(x => !/^HMIMV-/.test(x)); vus.push({ svc, taille: t.length, fichiers: f.slice(0, 5), url: u.replace(/\?.*/, ''), post: post.slice(0, 1500), extrait: t.slice(0, 3000) }); } catch (e) {} };
   page.on('response', ecoute);
-  for (const d of cibles) {
+  /* 1) fichiers visibles de la liste (sans recherche) — le détail de chacun se charge au clic */
+  const noms = page.locator('text=/^HMIMV-[A-Z0-9-]+\\.(pdf|dwg|docx?|xlsx?)$/i');
+  const n = Math.min(6, await noms.count().catch(() => 0));
+  note('Découverte PJ : ' + n + ' fichier(s) visibles à ouvrir');
+  for (let i = 0; i < n; i++) {
+    try { const el = noms.nth(i); await el.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {}); await el.click({ timeout: 8000 }); await page.waitForTimeout(6000);
+      if (i === 0) await page.screenshot({ path: path.join(CAP, 'detail-1.png') }).catch(() => {});
+      /* onglet « Commentaires / visas » du panneau de droite, s'il existe */
+      const ong = page.locator('text=/^(Commentaires?|Visas?|Historique)$/i').first(); if (await ong.count()) { await ong.click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(3000); }
+    } catch (e) { note('Découverte PJ clic ' + (i + 1) + ' : ' + e.message.slice(0, 120)); }
+  }
+  /* 2) fichiers refusés commentés, via la recherche visible */
+  for (const d of cibles.slice(0, 2)) {
     try {
-      const champ = page.locator('input[placeholder*="Recherche" i]').first();
-      await champ.fill(''); await champ.fill(d.code); await champ.press('Enter'); await page.waitForTimeout(5000);
+      const champ = page.locator('input[placeholder*="Recherche" i]:visible').first();
+      if (!(await champ.count())) break;
+      await champ.click({ timeout: 5000 }); await champ.fill(d.code, { timeout: 8000 }); await champ.press('Enter'); await page.waitForTimeout(5000);
       const ligne = page.locator('text=' + (d.fichier || d.code)).first();
       if (await ligne.count()) { await ligne.click({ timeout: 8000 }).catch(() => {}); await page.waitForTimeout(7000); }
       await page.screenshot({ path: path.join(CAP, 'detail-' + d.code.slice(-12) + '.png') }).catch(() => {});
-    } catch (e) { note('Découverte PJ ' + d.code + ' : ' + e.message); }
+    } catch (e) { note('Découverte PJ ' + d.code + ' : ' + e.message.slice(0, 120)); }
   }
   page.off('response', ecoute);
   const avecF = vus.filter(v => v.fichiers.length);
+  vus.slice(0, 30).forEach(v => note('Découverte PJ · appel ' + v.svc + ' (' + v.taille + ' car.)'));
   note('Découverte PJ : ' + vus.length + ' appel(s) · services : ' + [...new Set(vus.map(v => v.svc))].join(', '));
   avecF.slice(0, 4).forEach((v, i) => { note('Découverte PJ · ' + v.svc + ' → ' + v.fichiers.join(' ; ')); fs.writeFileSync(path.join(CAP, 'detail-' + (i + 1) + '.json'), JSON.stringify(v, null, 1)); });
-  fs.writeFileSync(path.join(__dirname, '..', 'pj-decouverte.json'), JSON.stringify(vus.map(v => ({ svc: v.svc, taille: v.taille, fichiers: v.fichiers, extrait: v.fichiers.length ? v.extrait : '' })), null, 1));
+  fs.writeFileSync(path.join(__dirname, '..', 'pj-decouverte.json'), JSON.stringify(vus.map(v => ({ svc: v.svc, taille: v.taille, fichiers: v.fichiers, post: v.post.replace(/"UserHash":"[^"]+"/, '"UserHash":"…"').slice(0, 800), extrait: v.extrait.slice(0, 2500) })), null, 1));
 }
 
 async function deposerPJ(out, ctx, base) {
