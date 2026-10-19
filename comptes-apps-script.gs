@@ -5,12 +5,14 @@
    et « demandes » (registre de contrôle des adresses externes : email | nom | date | statut).
    Valider un compte externe : dans « comptes », colonne statut, remplacer « attente » par « ok ». */
 var DOMAINES = ['bymaro.ma', 'bouygues-construction.com'];   // adresses de l'organisation : accès immédiat. Les autres sont inscrites dans « demandes » et attendent la validation d'un admin.
-var ADMINS = [];   // facultatif. Le PREMIER compte créé devient propriétaire (seul à voir « Gérer les comptes ») et administrateur ; tout le reste se gère dans la plateforme.
+var ADMINS = ['o.elkojji@bouygues-construction.com', 's.hariri@bouygues-construction.com', 'i.i.ibnoujabeldhel@bouygues-construction.com'];   // administrateurs (modification du Suivi CET)
+var PROPRIETAIRE = 'o.elkojji@bouygues-construction.com';   // seul à accéder à comptes.html (gestion des comptes)
 var VALIDITE_CODE_MIN = 15;
 
 function feuille() {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), f = ss.getSheetByName('comptes');
-  if (!f) { f = ss.insertSheet('comptes'); f.appendRow(['email', 'nom', 'hash', 'role', 'photo', 'code', 'codeDate', 'cree', 'statut']); }
+  if (!f) { f = ss.insertSheet('comptes'); f.appendRow(['email', 'nom', 'hash', 'role', 'photo', 'code', 'codeDate', 'cree', 'statut', 'vu', 'page']); }
+  else if (f.getRange(1, 10).getValue() !== 'vu') f.getRange(1, 10, 1, 2).setValues([['vu', 'page']]);
   return f;
 }
 function demandes() {
@@ -18,13 +20,32 @@ function demandes() {
   if (!f) { f = ss.insertSheet('demandes'); f.appendRow(['email', 'nom', 'date', 'statut']); }
   return f;
 }
+/* Temps d'utilisation : 1 signal / minute d'onglet visible = 1 minute, agrégé par jour · personne · interface */
+function activite() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), f = ss.getSheetByName('activite');
+  if (!f) { f = ss.insertSheet('activite'); f.appendRow(['jour', 'email', 'nom', 'interface', 'minutes', 'sessions', 'derniere']); f.setFrozenRows(1); }
+  return f;
+}
+function compter(u, page, maintenant) {
+  var jour = Utilities.formatDate(maintenant, 'Africa/Casablanca', 'yyyy-MM-dd'), cle = jour + '|' + String(u.email).toLowerCase() + '|' + page;
+  var cache = CacheService.getScriptCache(), a = activite(), row = Number(cache.get('r:' + cle) || 0);
+  if (!row || String(a.getRange(row, 1).getDisplayValue()) + '|' + String(a.getRange(row, 2).getValue()).toLowerCase() + '|' + a.getRange(row, 4).getValue() !== cle) {
+    row = 0; var n = a.getLastRow();
+    if (n > 1) { var v = a.getRange(Math.max(2, n - 400), 1, Math.min(n - 1, 401), 4).getDisplayValues(), base = Math.max(2, n - 400);
+      for (var i = v.length - 1; i >= 0; i--) if (v[i][0] + '|' + String(v[i][1]).toLowerCase() + '|' + v[i][3] === cle) { row = base + i; break; } }
+    if (!row) { a.appendRow([jour, u.email, u.nom, page, 0, 0, maintenant]); row = a.getLastRow(); a.getRange(row, 1).setNumberFormat('@'); a.getRange(row, 1).setValue(jour); }
+    cache.put('r:' + cle, String(row), 21600);
+  }
+  var prec = a.getRange(row, 7).getValue(), nouvelle = !prec || (maintenant - new Date(prec)) > 5 * 60000;
+  a.getRange(row, 5, 1, 3).setValues([[Number(a.getRange(row, 5).getValue() || 0) + 1, Number(a.getRange(row, 6).getValue() || 0) + (nouvelle ? 1 : 0), maintenant]]);
+}
 function lire(email) {
   var f = feuille(), v = f.getDataRange().getValues();
   for (var i = 1; i < v.length; i++) if (String(v[i][0]).toLowerCase() === email) return { row: i + 1, email: v[i][0], nom: v[i][1], hash: v[i][2], role: v[i][3], photo: v[i][4], code: String(v[i][5]), codeDate: v[i][6], statut: String(v[i][8] || 'ok') };
   return null;
 }
-/* Propriétaire : seul à gérer les comptes. = le premier compte créé (enregistré dans les propriétés du script). */
-function proprio() { return String(PropertiesService.getScriptProperties().getProperty('PROPRIETAIRE') || '').toLowerCase(); }
+/* Propriétaire : seul à gérer les comptes (comptes.html) = PROPRIETAIRE ci-dessus. */
+function proprio() { return String(PROPRIETAIRE || PropertiesService.getScriptProperties().getProperty('PROPRIETAIRE') || '').toLowerCase(); }
 function estProprio(u) { return !!u && String(u.email).toLowerCase() === proprio(); }
 function estAdmin(u) { return !!u && (u.role === 'admin' || ADMINS.indexOf(String(u.email).toLowerCase()) >= 0); }
 function aucunAdmin() { var v = feuille().getDataRange().getValues(); for (var i = 1; i < v.length; i++) if (v[i][2] && v[i][3] === 'admin') return false; return ADMINS.length === 0; }
@@ -58,7 +79,7 @@ function doPost(e) {
       f.getRange(u.row, 2, 1, 8).setValues([[o.nom, sha(o.mdp), role, u.photo || '', '', '', u.hash ? (f.getRange(u.row, 8).getValue() || new Date()) : new Date(), attente ? 'attente' : 'ok']]);
       if (attente) {
         demandes().appendRow([email, o.nom, new Date(), 'à valider']);
-        var ad = admins(); if (ad.length) MailApp.sendEmail({ to: ad.join(','), subject: 'Plateforme CET · demande d’accès : ' + email, htmlBody: '<p><b>' + o.nom + '</b> (' + email + ') demande l’accès à la plateforme (adresse hors organisation).</p><p>Pour répondre : plateforme ▸ Accueil ▸ <b>Gérer les comptes</b> ▸ Valider ou Refuser.</p>' });
+        var ad = admins(); if (ad.length) MailApp.sendEmail({ to: ad.join(','), subject: 'Plateforme CET · demande d’accès : ' + email, htmlBody: '<p><b>' + o.nom + '</b> (' + email + ') demande l’accès à la plateforme (adresse hors organisation).</p><p>Pour répondre : ouvrez <b>https://oek4.github.io/cartographie/comptes.html</b> ▸ En attente ▸ Valider ou Refuser.</p>' });
       }
       return rep({ ok: true, nom: o.nom, role: role, attente: attente });
     }
@@ -69,6 +90,12 @@ function doPost(e) {
       if (u.statut === 'refus') return rep({ ok: false, msg: 'Accès refusé par l’administrateur.' });
       return rep({ ok: true, nom: u.nom, role: estAdmin(u) || estProprio(u) ? 'admin' : u.role, proprio: estProprio(u), photo: u.photo || '' });
     }
+    case 'ping': {   // présence : { email, mdp, page }
+      if (!u || u.hash !== sha(String(o.mdp))) return rep({ ok: false });
+      var now = new Date(), page = String(o.page || 'Plateforme').slice(0, 40);
+      var lock = LockService.getScriptLock(); try { lock.waitLock(5000); f.getRange(u.row, 10, 1, 2).setValues([[now, page]]); compter(u, page, now); } finally { lock.releaseLock(); }
+      return rep({ ok: true });
+    }
     case 'photo': {
       if (!u || u.hash !== sha(String(o.mdp))) return rep({ ok: false, msg: 'Non autorisé.' });
       f.getRange(u.row, 5).setValue(String(o.photo || '').slice(0, 48000));
@@ -77,8 +104,14 @@ function doPost(e) {
     case 'liste': {
       if (!estProprio(u) || u.hash !== sha(String(o.mdp))) return rep({ ok: false, msg: 'Réservé au propriétaire de la plateforme.' });
       var v = f.getDataRange().getValues(), out = [];
-      for (var i = 1; i < v.length; i++) if (v[i][0]) out.push({ email: v[i][0], nom: v[i][1], role: v[i][3] || 'user', cree: v[i][7] ? new Date(v[i][7]).toISOString() : '', statut: v[i][2] ? String(v[i][8] || 'ok') : 'incomplet', photo: v[i][4] ? 1 : 0 });
+      for (var i = 1; i < v.length; i++) if (v[i][0]) out.push({ email: v[i][0], nom: v[i][1], role: v[i][3] || 'user', cree: v[i][7] ? new Date(v[i][7]).toISOString() : '', statut: v[i][2] ? String(v[i][8] || 'ok') : 'incomplet', photo: v[i][4] ? 1 : 0, vu: v[i][9] ? new Date(v[i][9]).toISOString() : '', page: String(v[i][10] || '') });
       return rep({ ok: true, comptes: out });
+    }
+    case 'stats': {   // propriétaire : lignes jour·personne·interface des N derniers jours
+      if (!estProprio(u) || u.hash !== sha(String(o.mdp))) return rep({ ok: false, msg: 'Réservé au propriétaire de la plateforme.' });
+      var a = activite(), n = a.getLastRow(), lim = Utilities.formatDate(new Date(Date.now() - (Number(o.jours) || 90) * 864e5), 'Africa/Casablanca', 'yyyy-MM-dd'), rows = [];
+      if (n > 1) { var v = a.getRange(2, 1, n - 1, 7).getDisplayValues(); for (var i = 0; i < v.length; i++) if (v[i][0] >= lim) rows.push([v[i][0], String(v[i][1]).toLowerCase(), v[i][2], v[i][3], Number(v[i][4]) || 0, Number(v[i][5]) || 0]); }
+      return rep({ ok: true, rows: rows });
     }
     case 'maj': {   // { email: admin, mdp, cible, statut?, role?, suppr? }
       if (!estProprio(u) || u.hash !== sha(String(o.mdp))) return rep({ ok: false, msg: 'Réservé au propriétaire de la plateforme.' });

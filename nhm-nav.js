@@ -74,6 +74,13 @@
     return { nom: nom, att: att, dern: dern, online: navigator.onLine !== false, s: s };
   }
 
+  var PAGES = { saisie: 'Pointage chantier', carto: 'Suivi CET', resultats: 'R\u00e9sultats', vue3d: 'Vue 3D', docs: 'Documents', appro: 'Approvisionnement' };
+  function ping(app) {
+    if (document.hidden) return;
+    var s = sess(), api = ''; try { api = localStorage.getItem('hmimv.api.comptes') || ''; } catch (e) {}
+    if (!s || !s.h || !s.email || !api) return;
+    try { fetch(api, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'ping', email: s.email, mdp: s.h, page: PAGES[app] || app || '' }) }).catch(function () {}); } catch (e) {}
+  }
   class NhmNav extends HTMLElement {
     connectedCallback() {
       var r = this.attachShadow({ mode: 'open' });
@@ -106,6 +113,8 @@
         }; img.src = URL.createObjectURL(f);
       };
       this._t = setInterval(this.maj.bind(this), 5000);
+      var appK = this.getAttribute('app') || ''; ping(appK); this._p = setInterval(function () { ping(appK); }, 60000);
+      this._vis = function () { if (!document.hidden) ping(appK); }; document.addEventListener('visibilitychange', this._vis);
       this._on = this.maj.bind(this);
       window.addEventListener('storage', this._on); window.addEventListener('online', this._on); window.addEventListener('offline', this._on); window.addEventListener('focus', this._on);
       this.maj();
@@ -115,7 +124,7 @@
       this._fix = function () { document.querySelectorAll('div').forEach(function (d) { if (d.hasAttribute('data-nhm-fixed') || d.shadowRoot) return; var cs = getComputedStyle(d); if (cs.position === 'fixed' && cs.top === '0px' && d.getBoundingClientRect().height > innerHeight * 0.6) d.setAttribute('data-nhm-fixed', '1'); }); };
       this._fix(); this._mo = new MutationObserver(this._fix); this._mo.observe(document.body, { childList: true, subtree: true });
     }
-    disconnectedCallback() { if (this._mo) this._mo.disconnect(); document.removeEventListener('click', this._doc); clearInterval(this._t); window.removeEventListener('storage', this._on); window.removeEventListener('online', this._on); window.removeEventListener('offline', this._on); window.removeEventListener('focus', this._on); }
+    disconnectedCallback() { if (this._mo) this._mo.disconnect(); document.removeEventListener('click', this._doc); clearInterval(this._p); document.removeEventListener('visibilitychange', this._vis); clearInterval(this._t); window.removeEventListener('storage', this._on); window.removeEventListener('online', this._on); window.removeEventListener('offline', this._on); window.removeEventListener('focus', this._on); }
     maj() {
       var e = etat(), st = this._st, l = st.querySelector('.l');
       if (!e.online) { st.className = 'st off'; l.textContent = 'Hors ligne \u00b7 saisies conserv\u00e9es sur ce poste'; st.title = 'Aucune connexion : les saisies sont gard\u00e9es localement'; }

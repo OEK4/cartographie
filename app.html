@@ -472,7 +472,7 @@ function bonContenu(k, t) {
   return !!(m && m[1].toLowerCase().indexOf(APPS[k].sig) >= 0);
 }
 /* ---- Comptes : service Apps Script (comptes-apps-script.gs). Vide = mode local de démonstration sur ce poste. ---- */
-var API_COMPTES = "https://script.google.com/macros/s/AKfycbwvuXAeDoiMAXheFexMl_HwvOj67d7DdN-S8Nj4d8n2fYQ65xtyNkhg7zMA1jgzVa6Bmg/exec";
+var API_COMPTES = "";
 var DOMAINES = ["bymaro.ma", "bouygues-construction.com"];
 var ADMINS_LOCAL = [];   // facultatif : le premier compte créé devient administrateur
 var SESS = 'hmimv.session';
@@ -618,6 +618,8 @@ async function cptAct(btn, cible, o) {
 }
 async function cptBadge() { var s = sessLire(); if (!s || !s.proprio) return; if (!cptBadge.t) cptBadge.t = setInterval(cptBadge, 60000); try { var r = await api('liste', { email: s.email, mdp: s.h }); if (r.ok) { cptData = r.comptes || []; var p = cptData.filter(function (c) { return c.statut === 'attente'; }).length, b = document.getElementById('cptBtn'); if (b) b.innerHTML = 'G&eacute;rer les comptes' + (p ? ' <b style="display:inline-block;margin-left:6px;padding:0 6px;border-radius:9px;background:#E8A13C;color:#1F2620;">' + p + '</b>' : ''); } } catch (e) {} }
 function ouvrir(k) { if (!sessLire()) { loginSi(); return; } charger(k); }
+function pingAccueil() { var s = sessLire(); if (!API_COMPTES || !s || !s.h || document.hidden) return; api('ping', { email: s.email, mdp: s.h, page: 'Accueil' }).catch(function () {}); }
+setTimeout(pingAccueil, 1500); setInterval(pingAccueil, 60000); document.addEventListener('visibilitychange', pingAccueil);
 (async function () { var s = sessLire(); if (!s || !s.h || s.proprio !== undefined) return; try { var r = await api('connexion', { email: s.email, mdp: s.h }); if (r.ok) { s.proprio = !!r.proprio; s.role = r.role || s.role; sessEcrire(s, !!localStorage.getItem(SESS)); sessMaj(); } } catch (e) {} })();
 sessMaj();
 function charger(k) {
