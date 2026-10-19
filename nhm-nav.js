@@ -85,6 +85,7 @@
         '<div class="usr" id="usr"><button id="ub" title="Mon compte"><span class="av" id="av"></span><span class="nm"><b id="un"></b><i id="ur"></i></span></button>' +
         '<div class="mn" id="mn"><div class="top"><div class="big" id="big"></div><div class="who"><b id="mnN"></b><span id="mnE"></span><span class="role" id="mnR"></span></div></div>' +
         '<div class="ln" id="mnL"></div>' +
+        '<a id="gc" href="app.html#comptes" target="_top" style="display:none;align-items:center;justify-content:center;height:34px;border-radius:9px;background:#F1EFEA;color:#1F2620;text-decoration:none;font-size:13px;font-weight:700;">G\u00e9rer les comptes</a>' +
         '<div class="act"><label title="Choisir une photo (JPG, PNG)">Changer la photo<input type="file" id="ph" accept="image/*"></label><button class="out" id="out">Se d\u00e9connecter</button></div></div></div></div>';
       this._st = r.getElementById('st'); this._usr = r.getElementById('usr'); this._av = r.getElementById('av');
       r.getElementById('ub').onclick = function (e) { e.stopPropagation(); r.getElementById('mn').classList.toggle('on'); };
@@ -127,6 +128,7 @@
       avatar(this._av); avatar(r.getElementById('big'));
       r.getElementById('un').textContent = e.nom; r.getElementById('ur').textContent = s.role === 'admin' ? 'ADMIN' : (s.email ? 'UTILISATEUR' : 'OP\u00c9RATEUR');
       r.getElementById('mnN').textContent = e.nom; r.getElementById('mnE').textContent = s.email || 'compte local (sans e-mail)';
+      r.getElementById('gc').style.display = 'none';
       var rl = r.getElementById('mnR'); rl.textContent = s.role === 'admin' ? 'ADMINISTRATEUR' : 'UTILISATEUR'; rl.className = 'role' + (s.role === 'admin' ? ' adm' : '');
       var memo = false; try { memo = !!localStorage.getItem('hmimv.session'); } catch (x) {}
       r.getElementById('mnL').innerHTML = '<span>Droits : <b>' + (s.role === 'admin' ? 'modification du Suivi CET, validation des pointages' : 'pointage chantier, consultation du Suivi CET') + '</b></span><span>Synchronisation : <b>' + l.textContent + '</b></span><span>Session : <b>' + (memo ? 'm\u00e9moris\u00e9e sur ce poste' : 'jusqu\u2019\u00e0 fermeture du navigateur') + '</b></span>';

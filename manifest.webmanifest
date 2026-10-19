@@ -1,6 +1,6 @@
 {
-  "name": "Cartographie des locaux · HMIMV",
-  "short_name": "Locaux HMIMV",
+  "name": "HMIMV",
+  "short_name": "HMIMV",
   "description": "Quantités, planification, effectifs et avancement des locaux · SSP · TSG · SMT · CDI",
   "start_url": "./",
   "scope": "./",
