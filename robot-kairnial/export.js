@@ -77,6 +77,72 @@ async function decouvrirPJ(page, out) {
   fs.writeFileSync(path.join(__dirname, '..', 'pj-decouverte.json'), JSON.stringify(vus.map(v => ({ svc: v.svc, taille: v.taille, fichiers: v.fichiers, post: v.post.replace(/"UserHash":"[^"]+"/, '"UserHash":"…"').slice(0, 800), extrait: v.extrait.slice(0, 2500) })), null, 1));
 }
 
+/* Pièces jointes des commentaires de visa (service fichiers.getFilesComments) :
+   1) ouvre un document connu pour capter le modèle d'appel ; 2) rejoue l'appel pour chaque document commenté (liste des PJ) ;
+   3) pour les nouvelles PJ (20 max / passage), ouvre le document, clique « télécharger » sous la PJ et dépose le fichier dans le Drive. */
+const PJ_PRIO = 'HMIMV-EXE-BYM-230-SYP-ISS-TZ-TNX-0050-00';
+async function ouvrirDoc(page, code) {
+  const champ = page.locator('input[placeholder*="Recherche" i]:visible').first();
+  if (!(await champ.count())) return false;
+  await champ.click({ timeout: 5000 }); await champ.fill('', { timeout: 5000 }); await champ.fill(code, { timeout: 8000 }); await champ.press('Enter');
+  await page.waitForTimeout(5000);
+  const l = page.locator('text=/^' + code.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&') + '.*\\.(pdf|dwg|docx?|xlsx?|zip)$/i').first();
+  if (!(await l.count())) return false;
+  await l.click({ timeout: 8000 }); await page.waitForTimeout(6000); return true;
+}
+const nomsPJ = t => [...new Set((String(t).match(/[^"\\/<>:|*?]{3,180}\.(pdf|dwg|docx?|xlsx?|zip|jpe?g|png)\b/gi) || []).map(x => x.trim()).filter(x => !/^HMIMV-/i.test(x)))];
+async function recupererPJ(page, out) {
+  let idx = {}; try { idx = JSON.parse(fs.readFileSync(PJ_INDEX, 'utf8')); } catch (e) {}
+  const req = globalThis.__ctx.request;
+  let modele = null;
+  const ecoute = rep => { try { if (modele || !/getFilesComments/.test(rep.url())) return; const q = rep.request(); modele = { url: rep.url(), post: q.postData() || '', headers: q.headers() }; } catch (e) {} };
+  page.on('response', ecoute);
+  const okPrio = await ouvrirDoc(page, PJ_PRIO).catch(e => { note('PJ : ouverture ' + PJ_PRIO + ' : ' + e.message.slice(0, 100)); return false; });
+  await page.screenshot({ path: path.join(CAP, 'pj-prio.png') }).catch(() => {});
+  page.off('response', ecoute);
+  const dP = out.find(d => d.code === PJ_PRIO);
+  if (!modele || !dP || !dP.item_id || modele.post.indexOf(String(dP.item_id)) < 0) { note('PJ : modèle getFilesComments ' + (modele ? 'capté mais identifiant introuvable' : 'non capté') + ' (ouverture ' + okPrio + ')'); return; }
+  const H = {}; for (const k in modele.headers) if (!/^(content-length|host|cookie|:)/i.test(k)) H[k] = modele.headers[k];
+  /* 2) liste des PJ par document commenté */
+  const cibles = out.filter(d => d.item_id && (d.code === PJ_PRIO || (d.visas || []).some(v => v.commentaire))).slice(0, 600);
+  let exemple = null, nb = 0;
+  for (const d of cibles) {
+    try {
+      const r = await req.post(modele.url, { headers: H, data: modele.post.split(String(dP.item_id)).join(String(d.item_id)), timeout: 30000 });
+      const t = await r.text(); const n = nomsPJ(t);
+      if (n.length) { d.pjDoc = n.map(x => ({ n: x, u: idx[d.code + '|' + x] || '' })); nb += n.length; if (!exemple) exemple = { code: d.code, reponse: t.slice(0, 8000) }; }
+    } catch (e) {}
+  }
+  note('PJ : ' + cibles.length + ' document(s) commenté(s) interrogé(s) · ' + nb + ' pièce(s) jointe(s) trouvée(s)');
+  if (exemple) fs.writeFileSync(path.join(__dirname, '..', 'pj-decouverte.json'), JSON.stringify({ modele: { url: modele.url, post: modele.post.replace(/"UserHash":"[^"]+"/, '"UserHash":"…"') }, exemple }, null, 1));
+  /* 3) téléchargement des nouvelles PJ → Drive */
+  if (!PJ_URL) { note('PJ : dépôt Drive désactivé (secret KAIRNIAL_PJ_URL absent)'); return; }
+  let dep = 0, ko = 0;
+  for (const d of out.filter(x => (x.pjDoc || []).some(p => !p.u))) {
+    if (dep >= 20) break;
+    if (!(await ouvrirDoc(page, d.code).catch(() => false))) { ko++; continue; }
+    for (const p of d.pjDoc.filter(p => !p.u)) {
+      if (dep >= 20) break;
+      try {
+        const nom = page.locator('text=' + p.n).first();
+        if (!(await nom.count())) throw new Error('nom absent du panneau');
+        const boite = nom.locator('xpath=ancestor::*[.//button or .//a or .//*[@ng-click]][1]');
+        const btns = boite.locator('button, a, [ng-click], i, .fa');
+        const nbB = await btns.count(); let dl = null;
+        for (let k = nbB - 1; k >= 0 && !dl; k--) { dl = await Promise.all([page.waitForEvent('download', { timeout: 12000 }), btns.nth(k).click({ timeout: 5000 })]).then(x => x[0]).catch(() => null); }
+        if (!dl) throw new Error('bouton de téléchargement non trouvé');
+        const f = await dl.path(); const buf = fs.readFileSync(f);
+        if (buf.length > 25e6) throw new Error('fichier > 25 Mo');
+        const rep = await fetch(PJ_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'pj', key: PJ_KEY, doc: d.code, lot: d.lot, nom: p.n, data: buf.toString('base64') }) });
+        const j = await rep.json(); if (!j.ok || !j.url) throw new Error(j.msg || 'dépôt refusé');
+        p.u = j.url; idx[d.code + '|' + p.n] = j.url; dep++;
+      } catch (e) { ko++; if (ko <= 6) note('PJ échec ' + d.code + ' · ' + p.n + ' : ' + e.message.slice(0, 120)); }
+    }
+  }
+  fs.writeFileSync(PJ_INDEX, JSON.stringify(idx));
+  note('PJ : ' + dep + ' déposée(s) dans le Drive ce passage · ' + ko + ' échec(s) · ' + Object.keys(idx).length + ' au total');
+}
+
 async function deposerPJ(out, ctx, base) {
   let idx = {}; try { idx = JSON.parse(fs.readFileSync(PJ_INDEX, 'utf8')); } catch (e) {}
   const visas = []; out.forEach(d => (d.visas || []).forEach(v => { if (v.pj && v.pj.length) visas.push([d, v]); }));
@@ -334,11 +400,12 @@ async function deposerPJ(out, ctx, base) {
         const inter = visas.filter(v => !v.lot && !v.interne); const lotStep = visas.find(v => v.lot);
         const etat = inter.some(v => v.avis === 'REF') ? 'REF' : inter.some(v => v.avis === 'ATT') ? 'ATT' : inter.some(v => v.avis === 'VAO') ? 'VAO' : inter.some(v => v.avis === 'VSO') ? 'VSO' : 'ATT';
         const chemin = cheminF; const lotM = chemin.match(/Lot (\d+)\s*-\s*([^/]+)/i);
-        out.push({ code, fichier: nom, titre: String(f.files_desc || f.entete_oldName || brut).replace(/\.[a-z0-9]{2,5}$/i, ''), nomenclature, phase: (p[1] || phaseDossier || '').toUpperCase(), lot: p[3] || (lotM ? lotM[1] : ''), lotLab: lotStep ? lotStep.lab : (lotM ? 'Lot ' + lotM[1] + ' - ' + lotM[2].trim() : ''), dossier: chemin, type: p[4] || (nomenclature ? '' : 'AUT'), bat: (p[5] || (nomenclature ? '' : 'AUT')).toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(p[9] || '00').padStart(2, '0'), emetteur: String(f.createby || ''), email: String(f.user_email || ''), date: f.files_date ? new Date(+f.files_date * 1000).toISOString() : '', depot: lotStep && lotStep.date ? lotStep.date : '', taille: +f.files_size || 0, revisions: +f.files_nbrev || 1, archive: f.entete_archive === '1', circuit: nomsCircuits[String(f.circuit)] || String(f.circuit || ''), etat, visas });
+        out.push({ code, fichier: nom, titre: String(f.files_desc || f.entete_oldName || brut).replace(/\.[a-z0-9]{2,5}$/i, ''), nomenclature, phase: (p[1] || phaseDossier || '').toUpperCase(), lot: p[3] || (lotM ? lotM[1] : ''), lotLab: lotStep ? lotStep.lab : (lotM ? 'Lot ' + lotM[1] + ' - ' + lotM[2].trim() : ''), dossier: chemin, type: p[4] || (nomenclature ? '' : 'AUT'), bat: (p[5] || (nomenclature ? '' : 'AUT')).toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(p[9] || '00').padStart(2, '0'), emetteur: String(f.createby || ''), email: String(f.user_email || ''), date: f.files_date ? new Date(+f.files_date * 1000).toISOString() : '', depot: lotStep && lotStep.date ? lotStep.date : '', taille: +f.files_size || 0, revisions: +f.files_nbrev || 1, archive: f.entete_archive === '1', circuit: nomsCircuits[String(f.circuit)] || String(f.circuit || ''), etat, visas, item_id: f.item_id });
       }
       if (!out.length) throw new Error('Service de données : aucun fichier');
-      await decouvrirPJ(page, out).catch(e => note('Découverte PJ : ' + e.message));
       await deposerPJ(out);
+      await recupererPJ(page, out).catch(e => note('PJ commentaires : ' + e.message));
+      out.forEach(d => delete d.item_id);
       note('Dont hors nomenclature HMIMV : ' + out.filter(d => !d.nomenclature).length);
       fs.writeFileSync(path.join(__dirname, '..', 'kairnial.json'), JSON.stringify({ ok: true, date: new Date().toISOString(), total: viaApi.total || total || out.length, source: 'service', docs: out }));
       note('kairnial.json écrit depuis le service : ' + out.length + ' documents');
