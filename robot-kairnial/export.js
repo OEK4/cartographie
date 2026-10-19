@@ -6,6 +6,8 @@ const fs = require('fs');
 const path = require('path');
 
 const KURL = process.env.KAIRNIAL_URL, LOGIN = process.env.KAIRNIAL_LOGIN, PASS = process.env.KAIRNIAL_PASSWORD, PROJET = process.env.KAIRNIAL_PROJET || '';
+const PJ_URL = process.env.KAIRNIAL_PJ_URL || '', PJ_KEY = process.env.KAIRNIAL_PJ_KEY || '';   /* Apps Script « pièces jointes » → Google Drive privé */
+const PJ_INDEX = path.join(__dirname, '..', 'pj-index.json');   /* mémoire : pièce déjà déposée = lien réutilisé, pas de nouveau téléchargement */
 if (!KURL || !LOGIN || !PASS) { console.error('Secrets KAIRNIAL_URL / KAIRNIAL_LOGIN / KAIRNIAL_PASSWORD manquants'); process.exit(1); }
 const CAP = path.join(__dirname, 'captures'); fs.mkdirSync(CAP, { recursive: true });
 const DL = path.join(__dirname, 'dl'); fs.mkdirSync(DL, { recursive: true });
@@ -35,21 +37,55 @@ async function bouton(page, sel) {
 const journal = [];
 const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + m); };
 
+/* Pièces jointes des visas : le robot (connecté à Kairnial) les télécharge puis les dépose dans le Drive privé via Apps Script.
+   Le lien de téléchargement est cherché dans l'objet visa (champs contenant une URL ou un chemin de fichier). */
+async function deposerPJ(out, ctx, base) {
+  let idx = {}; try { idx = JSON.parse(fs.readFileSync(PJ_INDEX, 'utf8')); } catch (e) {}
+  const visas = []; out.forEach(d => (d.visas || []).forEach(v => { if (v.pj && v.pj.length) visas.push([d, v]); }));
+  let vu = 0, neuf = 0, ko = 0, echantillon = 0;
+  for (const [d, v] of visas) {
+    const raw = v._raw || {}; delete v._raw;
+    const urls = []; const scan = (o, k) => { if (o == null) return; if (typeof o === 'string') { if (/^https?:\/\//i.test(o) || /\.(pdf|dwg|docx?|xlsx?|zip|jpe?g|png)(\?|$)/i.test(o) && /[\/=]/.test(o)) urls.push([k, o]); return; } if (typeof o === 'object') for (const kk in o) scan(o[kk], kk); };
+    scan(raw, '');
+    if (echantillon < 3) { echantillon++; note('PJ échantillon ' + d.code + ' : clés ' + Object.keys(raw).join(',') + ' · liens ' + JSON.stringify(urls).slice(0, 600)); }
+    v.pjl = v.pj.map(n => {
+      const cle = d.code + '|' + n; vu++;
+      if (idx[cle]) return { n, u: idx[cle] };
+      const u = (urls.find(x => x[1].indexOf(n) >= 0 || decodeURIComponent(x[1]).indexOf(n) >= 0) || urls.find(x => /download|telecharg|getfile|attach|piece|fichier|file/i.test(x[0] + x[1])) || [])[1];
+      return { n, src: u || '' };
+    });
+  }
+  if (!PJ_URL || !globalThis.__ctx) { note('PJ : ' + vu + ' pièce(s) jointe(s) relevée(s)' + (PJ_URL ? '' : ' · dépôt Drive désactivé (secret KAIRNIAL_PJ_URL absent)')); for (const [, v] of visas) (v.pjl || []).forEach(p => delete p.src); return; }
+  const req = globalThis.__ctx.request, root = new URL(KURL).origin;
+  for (const [d, v] of visas) for (const p of v.pjl || []) {
+    if (p.u || !p.src) { delete p.src; continue; }
+    if (neuf >= 40) { delete p.src; continue; }   /* au plus 40 nouveaux fichiers par passage */
+    try {
+      const abs = /^https?:/i.test(p.src) ? p.src : root + (p.src.startsWith('/') ? '' : '/') + p.src;
+      const r = await req.get(abs, { timeout: 60000 });
+      const buf = await r.body();
+      if (!r.ok() || buf.length < 200 || /text\/html/i.test(r.headers()['content-type'] || '')) throw new Error('HTTP ' + r.status());
+      if (buf.length > 25e6) throw new Error('fichier > 25 Mo');
+      const rep = await fetch(PJ_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'pj', key: PJ_KEY, doc: d.code, lot: d.lot, nom: p.n, data: buf.toString('base64') }) });
+      const j = await rep.json();
+      if (!j.ok || !j.url) throw new Error(j.msg || 'dépôt refusé');
+      p.u = j.url; idx[d.code + '|' + p.n] = j.url; neuf++;
+    } catch (e) { ko++; if (ko <= 5) note('PJ échec ' + p.n + ' : ' + e.message); }
+    delete p.src;
+  }
+  fs.writeFileSync(PJ_INDEX, JSON.stringify(idx));
+  note('PJ : ' + vu + ' relevée(s) · ' + neuf + ' déposée(s) ce passage · ' + ko + ' échec(s) · ' + Object.keys(idx).length + ' au total dans le Drive');
+}
+
 (async () => {
   const browser = await chromium.launch();
-  const ctx = await browser.newContext({ acceptDownloads: true, locale: 'fr-FR', viewport: { width: 1600, height: 1000 } });
+  const ctx = await browser.newContext({ acceptDownloads: true, locale: 'fr-FR', viewport: { width: 1600, height: 1000 } }); globalThis.__ctx = ctx;
   let page = await ctx.newPage();
   /* Si Kairnial ouvre un module dans un nouvel onglet, on bascule dessus */
   /* Écoute des réponses du serveur : la liste des documents arrive en JSON — on garde celles qui contiennent des codes HMIMV */
   const api = []; let nApi = 0; const appels = []; const defs = []; let circuitsDef = null; const collecte = new Map(); let totalService = 0;
-  const reduire = (o) => { const F = o.fichiers || []; const V = o.visas || {}; totalService = +o.total || totalService; for (const f of F) { const s = {}; const vv = V[f.item_id] || {}; for (const k in vv) { const v = vv[k]; if (v.sub !== undefined) { s[k] = v; continue; } if (String(v.fv_subvisa) !== '-2') s[k] = { sub: v.fv_subvisa, date: v.fv_date, com: v.comment || '', par: [v.sender_firestname, v.sender_lastname].filter(Boolean).join(' '), titre: v.titleVisa || '', chrono: v.numChronoVisa || '' }; } collecte.set(String(f.item_id), { item_id: f.item_id, entete_nom: f.entete_nom, entete_oldName: f.entete_oldName, files_desc: f.files_desc, files_date: f.files_date, files_size: f.files_size, circuit: f.circuit, createby: f.createby, user_email: f.user_email, entete_archive: f.entete_archive, files_nbrev: f.files_nbrev, fcat_chemin: f.fcat_chemin, visas: s }); } return F.length; };
-  const toutes = []; // toutes les requêtes POST/JSON vues (diagnostic)
-  ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (/image|font|css|javascript/i.test(ct)) return; const u = rep.url(); const req = rep.request(); const postFull = req.postData() || ''; const post = postFull.slice(0, 300);
-    if (req.method() === 'POST' && toutes.length < 400) toutes.push(u.replace(/\?.*/, '').slice(-90) + ' ' + post.slice(0, 120).replace(/\s+/g, ' '));
-    let t = ''; try { t = await rep.text(); } catch (e) { t = ''; }
-    const estFichiers = /getFilesFromCat|fichiers\.(getFiles|list|search)|files\.(get|list|search)/i.test(u + ' ' + post);
-    if (estFichiers) { appels.push({ url: u, post: postFull, headers: req.headers() }); try { reduire(JSON.parse(t)); } catch (e) {} if (!/HMIMV-/.test(t) && appels.length <= 2) fs.writeFileSync(path.join(CAP, 'appel-fichiers-' + appels.length + '.txt'), (u + '\n' + post + '\n---\n' + t.slice(0, 200000))); }
-    if (!/HMIMV-/.test(t)) return; api.push({ url: u.replace(/\?.*/, '').slice(0, 160), ct: ct.slice(0, 40), method: req.method(), post, taille: t.length, nb: (t.match(/HMIMV-/g) || []).length }); if (nApi < 3) { nApi++; fs.writeFileSync(path.join(CAP, 'api-' + nApi + '.json'), t.slice(0, 400000)); } } catch (e) {} });
+  const reduire = (o) => { const F = o.fichiers || []; const V = o.visas || {}; totalService = +o.total || totalService; for (const f of F) { const s = {}; const vv = V[f.item_id] || {}; for (const k in vv) { const v = vv[k]; if (v.sub !== undefined) { s[k] = v; continue; } if (String(v.fv_subvisa) !== '-2') s[k] = { sub: v.fv_subvisa, date: v.fv_date, com: v.comment || '', par: [v.sender_firestname, v.sender_lastname].filter(Boolean).join(' '), titre: v.titleVisa || '', chrono: v.numChronoVisa || '', raw: v, pj: [...new Set((JSON.stringify(v).match(/[^"\\/:*?<>|]{3,180}\.(pdf|dwg|docx?|xlsx?|zip|jpe?g|png)\b/gi) || []).map(x => x.trim()))].slice(0, 12) }; } collecte.set(String(f.item_id), { item_id: f.item_id, entete_nom: f.entete_nom, entete_oldName: f.entete_oldName, files_desc: f.files_desc, files_date: f.files_date, files_size: f.files_size, circuit: f.circuit, createby: f.createby, user_email: f.user_email, entete_archive: f.entete_archive, files_nbrev: f.files_nbrev, fcat_chemin: f.fcat_chemin, visas: s }); } return F.length; };
+  ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (/image|font|css|javascript|octet/i.test(ct)) return; const t = await rep.text(); if (!/HMIMV-/.test(t)) return; const u = rep.url(); const req = rep.request(); const postFull = req.postData() || ''; const post = postFull.slice(0, 300); if (/getFilesFromCat/.test(u)) { appels.push({ url: u, post: postFull, headers: req.headers() }); try { reduire(JSON.parse(t)); } catch (e) {} } api.push({ url: u.replace(/\?.*/, '').slice(0, 160), ct: ct.slice(0, 40), method: req.method(), post, taille: t.length, nb: (t.match(/HMIMV-/g) || []).length }); if (nApi < 3) { nApi++; fs.writeFileSync(path.join(CAP, 'api-' + nApi + '.json'), t.slice(0, 400000)); } } catch (e) {} });
   ctx.on('response', async rep => { try { const ct = rep.headers()['content-type'] || ''; if (!/json/i.test(ct)) return; const t = await rep.text(); if (/"circuitsContent"/.test(t) && !circuitsDef) { circuitsDef = t; fs.writeFileSync(path.join(CAP, 'circuits.json'), t.slice(0, 3000000)); } if (/SOCOTEC|Bureau Contr/i.test(t) && !/getFilesFromCat/.test(rep.url()) && defs.length < 4) { defs.push({ url: rep.url().replace(/\?.*/, '').slice(0, 160), text: t }); fs.writeFileSync(path.join(CAP, 'def-' + defs.length + '.json'), t.slice(0, 2000000)); } } catch (e) {} });
   ctx.on('page', async p => { try { await p.waitForLoadState('domcontentloaded'); page = p; note('Nouvel onglet : ' + p.url().slice(0, 60)); } catch (e) {} });
   /* Adresse sans paramètres (pas de jeton dans le journal) */
@@ -59,13 +95,7 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
   try {
     /* 1. Connexion — Kairnial affiche un écran "Veuillez patienter" puis la page de connexion.
        Le champ mot de passe peut n'apparaître qu'après la saisie de l'identifiant : on tape lentement, on attend, puis on clique "Connexion" si besoin. */
-    /* Kairnial peut être lent ou indisponible : 3 tentatives de 90 s, 60 s de pause entre deux */
-    let ouvert = false;
-    for (let essai = 1; essai <= 3 && !ouvert; essai++) {
-      try { await page.goto(KURL, { waitUntil: 'domcontentloaded', timeout: 90000 }); ouvert = true; }
-      catch (e) { note('Kairnial injoignable (essai ' + essai + '/3) : ' + e.message.split('\n')[0]); if (essai < 3) await page.waitForTimeout(60000); }
-    }
-    if (!ouvert) throw new Error('Kairnial injoignable après 3 tentatives (plateforme indisponible ou très lente) — kairnial.json conservé');
+    await page.goto(KURL, { waitUntil: 'domcontentloaded' });
     await attendreLoader();
     const SEL_USER = ['input[placeholder*="Identifiant" i]', '#username', 'input[name="username"]', 'input[type="email"]', 'input[name*="login" i]', 'input[name*="user" i]', 'input[placeholder*="mail" i]', 'form input[type="text"]'];
     const SEL_PWD = ['#password', 'input[name="password"]', 'input[type="password"]'];
@@ -104,7 +134,7 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     note('Après connexion : ' + ou() + ' | ' + await texte());
     await page.screenshot({ path: path.join(CAP, '04-apres-connexion.png') });
     if (await bouton(page, 'input[type="password"]')) throw new Error('Connexion refusée (identifiant ou mot de passe) — voir 04-apres-connexion.png');
-    if (!/rfiles/.test(page.url())) { await page.goto(KURL, { waitUntil: 'domcontentloaded', timeout: 90000 }); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(4000); }
+    if (!/rfiles/.test(page.url())) { await page.goto(KURL, { waitUntil: 'domcontentloaded' }); await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(4000); }
 
     /* 2. Projet HMIMV puis liste des fichiers (si l'URL n'y mène pas déjà) */
     await page.screenshot({ path: path.join(CAP, '05-accueil.png') });
@@ -124,7 +154,7 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     if (!(await listeOK())) {
       /* Changer d'adresse ne suffit pas : rechargement complet sur la liste des fichiers */
       note('Rechargement complet sur la liste des fichiers');
-      await page.goto(KURL, { waitUntil: 'domcontentloaded', timeout: 90000 }).catch(() => {});
+      await page.goto(KURL, { waitUntil: 'domcontentloaded' }).catch(() => {});
       await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
       await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}); await attendreLoader(); await page.waitForTimeout(5000);
       await page.screenshot({ path: path.join(CAP, '06a-apres-rechargement.png') }).catch(() => {});
@@ -192,27 +222,10 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     const parPage = parseInt((t0.match(/1 - (\d+) de/) || [0, 50])[1]) || 50;
     const nbPages = total ? Math.ceil(total / parPage) : 1;
     note('Total ' + total + ' fichiers, ' + parPage + ' par page, ' + nbPages + ' pages ; déjà collectés : ' + collecte.size);
-    /* Clic sur le numéro de page dans le pied de liste : on cherche dans tous les cadres, sans contrainte de position, et on force le clic si l'élément est masqué par le défilement */
-    const allerPage = async (pg) => {
-      for (const fr of page.frames()) {
-        const hit = await fr.evaluate((pg) => {
-          const want = String(pg); const els = [...document.querySelectorAll('a, li, span, button, div')].filter(e => e.children.length === 0 && e.textContent.trim() === want);
-          // préférer un élément situé dans un conteneur de pagination (voisins numériques)
-          const score = e => { const p = e.parentElement && e.parentElement.parentElement; if (!p) return 0; const t = p.textContent || ''; return (t.match(/\b\d{1,3}\b/g) || []).length; };
-          els.sort((a, b) => score(b) - score(a)); const e = els[0]; if (!e) return null;
-          e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height, n: els.length, s: score(e) };
-        }, pg).catch(() => null);
-        if (hit && hit.w > 0 && hit.s >= 2) { await page.mouse.click(hit.x, hit.y).catch(() => {}); return true; }
-      }
-      // dernier recours : bouton "page suivante"
-      const nxt = await bouton(page, '[title*="suivant" i], [aria-label*="next" i], .k-i-arrow-e, .k-pager-nav:not(.k-pager-first):not(.k-pager-last) span.k-i-arrow-60-right, a.k-link[title*="next" i]');
-      if (nxt) { await nxt.click({ force: true, timeout: 3000 }).catch(() => {}); return true; }
-      return false;
-    };
     const TAKE = 100; let ok = false;
     try {
       const dernier = appels[appels.length - 1];
-      if (!dernier) { note('Requêtes POST vues (' + toutes.length + ') : ' + toutes.slice(0, 60).join(' || ')); throw new Error('aucun appel de liste de fichiers capté'); }
+      if (!dernier) throw new Error('aucun appel getFilesFromCat capté');
       fs.writeFileSync(path.join(CAP, 'appel-post.json'), dernier.post.slice(0, 20000));
       const body = JSON.parse(dernier.post); const P = body.params[0];
       const hdr = {}; for (const k in dernier.headers) if (/^(content-type|accept|x-xsrf-token|x-csrf-token|authorization|userhash|machineid)$/i.test(k)) hdr[k] = dernier.headers[k];
@@ -241,11 +254,16 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
     if (!ok || (totalService && collecte.size < totalService)) {
       try {
         /* Repli : parcourir les pages à l'écran ; chaque page déclenche un appel getFilesFromCat que l'on réduit au vol */
-        note('Repli : pagination à l\'écran sur ' + nbPages + ' pages'); const t0Repli = Date.now();
+        note('Repli : pagination à l\'écran sur ' + nbPages + ' pages');
         const debutPg = Math.max(2, Math.floor(collecte.size / parPage) + 1);
         for (let pg = debutPg; pg <= nbPages && pg <= 400; pg++) {
-          if (Date.now() - t0Repli > 25 * 60000) { note('Repli arrêté après 25 min'); break; }
-          const avant = collecte.size; const clique = await allerPage(pg);
+          const avant = collecte.size; let clique = false;
+          for (const fr of page.frames()) {
+            const cand = fr.locator('a, li, span, button').filter({ hasText: new RegExp('^\\s*' + pg + '\\s*$') });
+            const n = Math.min(await cand.count().catch(() => 0), 20);
+            for (let i = n - 1; i >= 0; i--) { const l = cand.nth(i); const bb = await l.boundingBox().catch(() => null); if (bb && bb.y > 700 && await l.isVisible().catch(() => false)) { await l.click({ timeout: 5000 }).catch(() => {}); clique = true; break; } }
+            if (clique) break;
+          }
           if (!clique) { note('Page ' + pg + ' : bouton introuvable — arrêt'); break; }
           for (let w = 0; w < 40 && collecte.size === avant; w++) await page.waitForTimeout(500);
           await attendreLoader();
@@ -270,13 +288,15 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
         const cheminF = String(f.fcat_chemin || ''); const phaseM = cheminF.match(/0[0-4]\s*-?\s*(R[ÉE]F[ÉE]RENCE|MARCH[ÉE]|APS|APD|EXE)/i);
         const phaseDossier = phaseM ? phaseM[1].toUpperCase().replace(/[ÉE]/g, 'E').replace('REFERENCE', 'REF') : '';
         const circ = circuits[String(f.circuit)] || {}; const vs = viaApi.visas[f.item_id] || {};
-        const visas = Object.keys(vs).map(k => { const v = vs[k], st = circ[k] || {}, lab = st.label || ('Étape ' + k); const s = String(v.sub); const sv = s === '-1' ? null : (st.subs || []).find(x => String(x.index) === s); const avis = s === '-1' ? 'ATT' : sv ? norm(sv.label) : 'ATT'; return { etape: +k, k: (lab.match(/^\d{2}-([A-Z]{2,5})/) || lab.match(/^([A-Z]{2,5})\b/) || ['', 'V' + k])[1], lab, lot: /^Lot \d+/.test(lab), interne: !/^Lot \d+/.test(lab) && (/BYMARO|^Étape \d+$|^_+$|^\d+$/i.test(lab) || !lab.trim()), avis, code: sv ? sv.label : (s === '-1' ? 'ATT' : s), libelle: sv ? sv.LongDesc : (s === '-1' ? 'En attente de visa' : ''), date: v.date ? new Date(+v.date * 1000).toISOString() : '', par: v.par, commentaire: v.com, titre: v.titre, chrono: v.chrono }; }).sort((a, b) => a.etape - b.etape);
+        const visas = Object.keys(vs).map(k => { const v = vs[k], st = circ[k] || {}, lab = st.label || ('Étape ' + k); const s = String(v.sub); const sv = s === '-1' ? null : (st.subs || []).find(x => String(x.index) === s); const avis = s === '-1' ? 'ATT' : sv ? norm(sv.label) : 'ATT'; const k0 = (lab.match(/^\d{2}-([A-Z]{2,5})/) || lab.match(/^([A-Z]{2,5})\b/) || ['', 'V' + k])[1], spe = (lab.match(/\b(ELEC|VRD|FLUIDE|STRUCT|CVC|PLOMB|SSI|HQE|ACOUST|CFA|CFO)/i) || [''])[0].toUpperCase().replace('FLUIDE', 'FLU').replace('STRUCT', 'STR').replace('PLOMB', 'PLB').replace('ACOUST', 'ACO');
+          return { etape: +k, k: spe && spe !== k0 ? k0 + ' ' + spe : k0, lab, pj: v.pj || [], lot: /^Lot \d+/.test(lab), interne: !/^Lot \d+/.test(lab) && (/BYMARO|^Étape \d+$|^_+$|^\d+$/i.test(lab) || !lab.trim()), avis, code: sv ? sv.label : (s === '-1' ? 'ATT' : s), libelle: sv ? sv.LongDesc : (s === '-1' ? 'En attente de visa' : ''), date: v.date ? new Date(+v.date * 1000).toISOString() : '', par: v.par, commentaire: v.com, titre: v.titre, chrono: v.chrono, _raw: v.raw }; }).sort((a, b) => a.etape - b.etape);
         const inter = visas.filter(v => !v.lot && !v.interne); const lotStep = visas.find(v => v.lot);
         const etat = inter.some(v => v.avis === 'REF') ? 'REF' : inter.some(v => v.avis === 'ATT') ? 'ATT' : inter.some(v => v.avis === 'VAO') ? 'VAO' : inter.some(v => v.avis === 'VSO') ? 'VSO' : 'ATT';
         const chemin = cheminF; const lotM = chemin.match(/Lot (\d+)\s*-\s*([^/]+)/i);
         out.push({ code, fichier: nom, titre: String(f.files_desc || f.entete_oldName || brut).replace(/\.[a-z0-9]{2,5}$/i, ''), nomenclature, phase: (p[1] || phaseDossier || '').toUpperCase(), lot: p[3] || (lotM ? lotM[1] : ''), lotLab: lotStep ? lotStep.lab : (lotM ? 'Lot ' + lotM[1] + ' - ' + lotM[2].trim() : ''), dossier: chemin, type: p[4] || (nomenclature ? '' : 'AUT'), bat: (p[5] || (nomenclature ? '' : 'AUT')).toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(p[9] || '00').padStart(2, '0'), emetteur: String(f.createby || ''), email: String(f.user_email || ''), date: f.files_date ? new Date(+f.files_date * 1000).toISOString() : '', depot: lotStep && lotStep.date ? lotStep.date : '', taille: +f.files_size || 0, revisions: +f.files_nbrev || 1, archive: f.entete_archive === '1', circuit: nomsCircuits[String(f.circuit)] || String(f.circuit || ''), etat, visas });
       }
       if (!out.length) throw new Error('Service de données : aucun fichier');
+      await deposerPJ(out);
       note('Dont hors nomenclature HMIMV : ' + out.filter(d => !d.nomenclature).length);
       fs.writeFileSync(path.join(__dirname, '..', 'kairnial.json'), JSON.stringify({ ok: true, date: new Date().toISOString(), total: viaApi.total || total || out.length, source: 'service', docs: out }));
       note('kairnial.json écrit depuis le service : ' + out.length + ' documents');
@@ -344,11 +364,15 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
       for (let tour = 0; tour < 12; tour++) { const on = (await cases()).filter(c => c.on); for (const c of on) { await page.mouse.click(c.x, c.y); await page.waitForTimeout(100); } await page.mouse.wheel(0, 700); await page.waitForTimeout(400); if (!(await cases()).some(c => c.on) && tour > 0) break; }
       await page.mouse.wheel(0, -20000); await page.waitForTimeout(400);
     };
-    const debutEcran = Date.now();
     for (let pg = 1; pg <= nbPages && pg <= 400; pg++) {
-      if (Date.now() - debutEcran > 25 * 60000) { note('Lecture écran arrêtée après 25 min à la page ' + pg); break; }
       if (pg > 1) {
-        const ok = await allerPage(pg);
+        let ok = false;
+        for (const fr of page.frames()) {
+          const cand = fr.locator('a, li, span, button').filter({ hasText: new RegExp('^\\s*' + pg + '\\s*$') });
+          const n = Math.min(await cand.count().catch(() => 0), 20);
+          for (let i = n - 1; i >= 0; i--) { const l = cand.nth(i); const bb = await l.boundingBox().catch(() => null); if (bb && bb.y > 700 && await l.isVisible().catch(() => false)) { await l.click({ timeout: 5000 }).catch(() => {}); ok = true; break; } }
+          if (ok) break;
+        }
         if (!ok) { note('Page ' + pg + ' : bouton de pagination introuvable — arrêt'); break; }
         await page.waitForTimeout(2500); await attendreLoader();
         const attendu = ((pg - 1) * parPage + 1) + ' - ';
@@ -377,12 +401,11 @@ const note = m => { journal.push(new Date().toISOString().slice(11, 19) + ' ' + 
       const [dd, mm, yy] = (r.date || '').split('/');
       out.push({ code, fichier: r.fichier, titre: r.desc || brut, phase: (p[1] || '').toUpperCase(), lot: p[3] || (lotB ? (lotB.t.match(/\d+/) || [''])[0] : ''), type: p[4] || '', bat: (p[5] || '').toUpperCase(), zone: p[6] || '', niveau: p[7] || '', indice: String(p[9] || '00').padStart(2, '0'), emetteur: r.emetteur, date: yy ? new Date(+yy, +mm - 1, +dd).toISOString() : '', lotLab: lotB ? lotB.t : '', lotAvis: lotB ? avisCouleur(lotB.bg, lotB.fg) : '', visas, historique: histo[code] || [] });
     }
-    if (total && out.length < total * 0.9) { note('Lecture écran incomplète : ' + out.length + ' / ' + total + ' — kairnial.json conservé tel quel'); throw new Error('Lecture écran incomplète (' + out.length + ' / ' + total + ')'); }
     fs.writeFileSync(path.join(__dirname, '..', 'kairnial.json'), JSON.stringify({ ok: true, date: new Date().toISOString(), total, colonnesRapport, docs: out }));
     console.log(out.length + ' documents lus');
   } catch (e) {
     await page.screenshot({ path: path.join(CAP, '99-erreur.png') }).catch(() => {});
     note('ÉCHEC : ' + e.message);
     console.error('Échec : ' + e.message); process.exitCode = 1;
-  } finally { note('API captées (fin) : ' + JSON.stringify(api)); fs.writeFileSync(path.join(CAP, 'journal.txt'), journal.join('\n')); try { fs.writeFileSync(path.join(__dirname, '..', 'robot-journal.txt'), journal.join('\n')); } catch (e) {} await browser.close(); }
+  } finally { note('API captées (fin) : ' + JSON.stringify(api)); fs.writeFileSync(path.join(CAP, 'journal.txt'), journal.join('\n')); await browser.close(); }
 })();
