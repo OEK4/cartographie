@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: kairnial
-  cancel-in-progress: true
+  cancel-in-progress: false   # un passage en cours n’est jamais interrompu par le suivant
 
 jobs:
   export:
