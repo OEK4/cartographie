@@ -44,7 +44,7 @@ jobs:
         run: |
           git config user.name "robot-kairnial"
           git config user.email "robot@users.noreply.github.com"
-          git add kairnial.json robot-journal.txt pj-index.json 2>/dev/null || git add kairnial.json robot-journal.txt
+          git add kairnial.json robot-journal.txt; git add pj-index.json pj-decouverte.json 2>/dev/null || true
           git diff --cached --quiet && echo "Aucun changement" && exit 0
           git commit -m "Kairnial : états des documents $(date -u +'%Y-%m-%d %H:%M UTC')"
           git push
