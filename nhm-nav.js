@@ -121,7 +121,19 @@
       /* La barre est fixée au-dessus de tout (y compris les écrans de connexion) : on décale la page de sa hauteur. */
       var st = document.getElementById('nhm-nav-pad'); if (!st) { st = document.createElement('style'); st.id = 'nhm-nav-pad'; document.head.appendChild(st); }
       st.textContent = 'html{scroll-padding-top:38px}body{padding-top:38px !important;box-sizing:border-box}[data-nhm-fixed]{top:38px !important}';
-      this._fix = function () { document.querySelectorAll('div').forEach(function (d) { if (d.hasAttribute('data-nhm-fixed') || d.shadowRoot) return; var cs = getComputedStyle(d); if (cs.position === 'fixed' && cs.top === '0px' && d.getBoundingClientRect().height > innerHeight * 0.6) d.setAttribute('data-nhm-fixed', '1'); }); };
+      /* Décale sous la barre les overlays plein écran (position:fixed; top:0). Débitage : une passe par frame, seulement sur les nœuds ajoutés. */
+      var self = this, H = 38, en = false, file = [];
+      var passe = function (el) {
+        if (!el || el.nodeType !== 1 || el.tagName === 'NHM-NAV') return;
+        var st = el.getAttribute('style') || '';
+        if (/position\s*:\s*fixed/.test(st) && /(^|;)\s*(top\s*:\s*0(px)?|inset\s*:\s*0)/.test(st) && !el.dataset.nhmFix) { var cs = getComputedStyle(el); if (cs.position === 'fixed' && parseFloat(cs.top) === 0) { el.dataset.nhmFix = '1'; el.style.top = H + 'px'; } }
+        var ds = el.querySelectorAll ? el.querySelectorAll('[style*="fixed"]') : []; for (var k = 0; k < ds.length; k++) { var d = ds[k]; if (d.dataset.nhmFix) continue; var s2 = d.getAttribute('style') || ''; if (!/(^|;)\s*(top\s*:\s*0(px)?|inset\s*:\s*0)/.test(s2)) continue; var c2 = getComputedStyle(d); if (c2.position === 'fixed' && parseFloat(c2.top) === 0) { d.dataset.nhmFix = '1'; d.style.top = H + 'px'; } }
+      };
+      this._fix = function (recs) {
+        if (recs) { for (var a = 0; a < recs.length; a++) { var ad = recs[a].addedNodes; for (var b = 0; b < ad.length; b++) file.push(ad[b]); } } else file.push(document.body);
+        if (en) return; en = true;
+        requestAnimationFrame(function () { en = false; var lot = file.splice(0, file.length); for (var q = 0; q < lot.length; q++) passe(lot[q]); });
+      };
       this._fix(); this._mo = new MutationObserver(this._fix); this._mo.observe(document.body, { childList: true, subtree: true });
     }
     disconnectedCallback() { if (this._mo) this._mo.disconnect(); document.removeEventListener('click', this._doc); clearInterval(this._p); document.removeEventListener('visibilitychange', this._vis); clearInterval(this._t); window.removeEventListener('storage', this._on); window.removeEventListener('online', this._on); window.removeEventListener('offline', this._on); window.removeEventListener('focus', this._on); }
