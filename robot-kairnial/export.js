@@ -113,8 +113,11 @@ async function recupererPJ(page, out) {
   for (const d of cibles) {
     try {
       const r = await req.post(modele.url, { headers: H, data: modele.post.split(String(dP.item_id)).join(String(d.item_id)), timeout: 30000 });
-      const t = await r.text(); const n = nomsPJ(t);
-      if (n.length) { d.pjDoc = n.map(x => ({ n: x, u: idx[d.code + '|' + x] || '' })); nb += n.length; if (!exemple) exemple = { code: d.code, reponse: t.slice(0, 8000) }; }
+      const t = await r.text();
+      /* Réponse getFilesComments : { "<fileId>": [ { visaTitle, commentByFirstname/Lastname, commentDate, files:[{ entete_nom, item_id, path, size }] } ] } */
+      let n = [], meta = {};
+      try { const o = JSON.parse(t); Object.values(o).forEach(arr => (Array.isArray(arr) ? arr : []).forEach(c => (c.files || []).forEach(f => { if (f.entete_nom && !n.includes(f.entete_nom)) { n.push(f.entete_nom); meta[f.entete_nom] = { item: f.item_id, path: f.path, size: +f.size || 0, visa: c.visaTitle || '', par: ((c.commentByFirstname || '') + ' ' + (c.commentByLastname || '')).trim(), date: c.commentDate ? new Date(c.commentDate * 1000).toISOString() : '' }; } }))); } catch (e) { n = nomsPJ(t); }
+      if (n.length) { d.pjDoc = n.map(x => ({ n: x, u: idx[d.code + '|' + x] || '', m: meta[x] || {} })); nb += n.length; if (!exemple) exemple = { code: d.code, reponse: t.slice(0, 8000) }; }
     } catch (e) {}
   }
   note('PJ : ' + cibles.length + ' document(s) commenté(s) interrogé(s) · ' + nb + ' pièce(s) jointe(s) trouvée(s)');
