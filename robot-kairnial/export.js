@@ -206,11 +206,17 @@ async function deposerPJ(out, ctx, base) {
   try {
     /* 1. Connexion — Kairnial affiche un écran "Veuillez patienter" puis la page de connexion.
        Le champ mot de passe peut n'apparaître qu'après la saisie de l'identifiant : on tape lentement, on attend, puis on clique "Connexion" si besoin. */
-    await page.goto(KURL, { waitUntil: 'domcontentloaded' });
-    await attendreLoader();
     const SEL_USER = ['input[placeholder*="Identifiant" i]', '#username', 'input[name="username"]', 'input[type="email"]', 'input[name*="login" i]', 'input[name*="user" i]', 'input[placeholder*="mail" i]', 'form input[type="text"]'];
     const SEL_PWD = ['#password', 'input[name="password"]', 'input[type="password"]'];
-    const user = await premier(page, SEL_USER, 60000);
+    /* Jusqu'à 3 essais : si l'écran d'attente ne débouche pas sur la page de connexion (Kairnial lent), on recharge. */
+    let user = null;
+    for (let essai = 1; essai <= 3 && !user; essai++) {
+      await page.goto(KURL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await attendreLoader();
+      user = await premier(page, SEL_USER, essai < 3 ? 45000 : 60000).catch(() => null);
+      if (!user) { note('Connexion : page de connexion non affichée (essai ' + essai + '/3) — rechargement'); await page.screenshot({ path: path.join(CAP, '00-attente-' + essai + '.png') }).catch(() => {}); await page.waitForTimeout(5000); }
+    }
+    if (!user) throw new Error('Kairnial n’a pas affiché la page de connexion après 3 essais (service lent ou indisponible)');
     await attendreLoader(); await page.waitForTimeout(1500);
     note('Page de connexion : ' + ou() + ' | champ identifiant = ' + user._repere + ' | ' + await texte());
     await page.screenshot({ path: path.join(CAP, '01-login.png') });
