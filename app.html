@@ -222,6 +222,7 @@ html.accueil #splash{display:none;}
 @media(max-width:760px){#spA{display:none}}
 
 </style>
+
 </head>
 <body>
 <script>/* retour accueil */ try { if (location.hash === '#accueil' || sessionStorage.getItem('hmimv.vu')) document.documentElement.className += ' accueil'; sessionStorage.setItem('hmimv.vu', '1'); } catch (e) {}</script>
@@ -473,10 +474,13 @@ function bonContenu(k, t) {
 }
 /* ---- Comptes : service Apps Script (comptes-apps-script.gs). Vide = mode local de démonstration sur ce poste. ---- */
 var API_COMPTES = "";
+/* Hébergement des documents (Drive privé via pieces-jointes-apps-script.gs) : URL /exec + la CLE du script. Vide = documents reçus enregistrés sur ce poste seulement. */
+var API_PJ = "";
+var API_PJ_KEY = "";
 var DOMAINES = ["bymaro.ma", "bouygues-construction.com"];
 var ADMINS_LOCAL = [];   // facultatif : le premier compte créé devient administrateur
 var SESS = 'hmimv.session';
-try { localStorage.setItem('hmimv.api.comptes', API_COMPTES); } catch (e) {}
+try { localStorage.setItem('hmimv.api.comptes', API_COMPTES); localStorage.setItem('hmimv.api.pj', API_PJ); localStorage.setItem('hmimv.api.pjkey', API_PJ_KEY); } catch (e) {}
 function sessLire() { try { return JSON.parse(localStorage.getItem(SESS) || sessionStorage.getItem(SESS) || 'null'); } catch (e) { return null; } }
 function sessEcrire(s, rmb) { try { var t = JSON.stringify(s); localStorage.removeItem(SESS); sessionStorage.removeItem(SESS); (rmb ? localStorage : sessionStorage).setItem(SESS, t); localStorage.setItem('hmimv.role', s.role); localStorage.setItem('hmimv.user', s.nom); localStorage.setItem('saisieTerrain.nom', s.nom); } catch (e) {} }
 function deconnecter() { try { localStorage.removeItem(SESS); sessionStorage.removeItem(SESS); localStorage.removeItem('hmimv.role'); } catch (e) {} sessMaj(); loginSi(); }
