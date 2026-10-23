@@ -107,47 +107,53 @@ async function recupererPJ(page, out) {
   const dP = out.find(d => d.code === PJ_PRIO);
   if (!modele || !dP || !dP.item_id || modele.post.indexOf(String(dP.item_id)) < 0) { note('PJ : modèle getFilesComments ' + (modele ? 'capté mais identifiant introuvable' : 'non capté') + ' (ouverture ' + okPrio + ')'); return; }
   const H = {}; for (const k in modele.headers) if (!/^(content-length|host|cookie|:)/i.test(k)) H[k] = modele.headers[k];
-  /* 2) liste des PJ par document commenté */
-  const cibles = out.filter(d => d.item_id && (d.code === PJ_PRIO || (d.visas || []).some(v => v.commentaire))).slice(0, 600);
-  let exemple = null, nb = 0;
+  /* 2) liste des PJ par document commenté — Kairnial refuse les appels rejoués (403 CSRF) : on OUVRE chaque document
+        dans la page et on capte la réponse getFilesComments que Kairnial émet lui-même. Lot limité par passage (ordre : refusés d'abord). */
+  const PJ_LOT = +(process.env.KAIRNIAL_PJ_LOT || 40);
+  const dejaVus = idx.__vus || {};
+  const prio = d => (d.visas || []).some(v => /REF/.test(v.avis)) ? 0 : 1;
+  const cibles = out.filter(d => d.code === PJ_PRIO || (d.visas || []).some(v => v.commentaire || /REF|VAO/.test(v.avis))).filter(d => d.code === PJ_PRIO || !dejaVus[d.code] || (Date.now() - dejaVus[d.code]) > 7 * 864e5).sort((a, b) => prio(a) - prio(b)).slice(0, PJ_LOT);
+  let exemple = null, nb = 0, ouverts = 0, dep = 0, ko = 0; const PJ_MAXDL = 20;
+  const captes = {};
+  const ecouteDoc = async rep => { try { if (!/getFilesComments/.test(rep.url())) return; const t = await rep.text().catch(() => ''); const o = JSON.parse(t); Object.assign(captes, o); } catch (e) {} };
+  page.on('response', ecouteDoc);
   for (const d of cibles) {
     try {
-      /* Appel rejoué DANS la page Kairnial (même session, mêmes cookies, même jeton) */
-      const corps = modele.post.split(String(dP.item_id)).join(String(d.item_id));
-      const t = await page.evaluate(async ([u, h, b]) => { try { const r = await fetch(u, { method: 'POST', headers: h, body: b, credentials: 'include' }); return await r.text(); } catch (e) { return 'ERR ' + e.message; } }, [modele.url, H, corps]);
-      if (nb === 0 && d.code === PJ_PRIO) note('PJ : réponse rejouée pour ' + d.code + ' (' + t.length + ' car.) : ' + t.slice(0, 300).replace(/\s+/g, ' '));
-      /* Réponse getFilesComments : { "<fileId>": [ { visaTitle, commentByFirstname/Lastname, commentDate, files:[{ entete_nom, item_id, path, size }] } ] } */
-      let n = [], meta = {};
-      try { const o = JSON.parse(t); Object.values(o).forEach(arr => (Array.isArray(arr) ? arr : []).forEach(c => (c.files || []).forEach(f => { if (f.entete_nom && !n.includes(f.entete_nom)) { n.push(f.entete_nom); meta[f.entete_nom] = { item: f.item_id, path: f.path, size: +f.size || 0, visa: c.visaTitle || '', par: ((c.commentByFirstname || '') + ' ' + (c.commentByLastname || '')).trim(), date: c.commentDate ? new Date(c.commentDate * 1000).toISOString() : '' }; } }))); } catch (e) { n = nomsPJ(t); }
-      if (n.length) { d.pjDoc = n.map(x => ({ n: x, u: idx[d.code + '|' + x] || '', m: meta[x] || {} })); nb += n.length; if (!exemple) exemple = { code: d.code, reponse: t.slice(0, 8000) }; }
+      const avant = Object.keys(captes).length;
+      if (!(await ouvrirDoc(page, d.code).catch(() => false))) continue;
+      ouverts++;
+      for (let w = 0; w < 20 && Object.keys(captes).length === avant; w++) await page.waitForTimeout(250);
+      const n = [], meta = {};
+      Object.values(captes).forEach(arr => (Array.isArray(arr) ? arr : []).forEach(c => (c.files || []).forEach(f => { if (f.entete_nom && !n.includes(f.entete_nom)) { n.push(f.entete_nom); meta[f.entete_nom] = { item: f.item_id, path: f.path, size: +f.size || 0, visa: c.visaTitle || '', par: ((c.commentByFirstname || '') + ' ' + (c.commentByLastname || '')).trim(), date: c.commentDate ? new Date(c.commentDate * 1000).toISOString() : '' }; } })));
+      for (const k in captes) delete captes[k];
+      dejaVus[d.code] = Date.now();
+      if (n.length) { d.pjDoc = n.map(x => ({ n: x, u: idx[d.code + '|' + x] || '', m: meta[x] || {} })); nb += n.length; if (!exemple) exemple = { code: d.code, reponse: n.join(' ; ') }; }
+      /* téléchargement immédiat pendant que le panneau de droite est ouvert */
+      if (PJ_URL) for (const p of (d.pjDoc || []).filter(p => !p.u)) {
+        if (dep >= PJ_MAXDL) break;
+        try {
+          const nom = page.locator('text=' + JSON.stringify(p.n)).first();
+          if (!(await nom.count())) throw new Error('nom absent du panneau');
+          /* l'icône de téléchargement est le dernier bouton/lien du bloc qui contient le nom (œil = aperçu, puis téléchargement) */
+          const boite = nom.locator('xpath=ancestor::*[.//button or .//a][1]');
+          const btns = boite.locator('button, a, [ng-click], i[class*="download"], [title*="charger" i]');
+          const nbB = await btns.count(); let dl = null;
+          for (let k = nbB - 1; k >= 0 && !dl; k--) { dl = await Promise.all([page.waitForEvent('download', { timeout: 12000 }), btns.nth(k).click({ timeout: 5000 })]).then(x => x[0]).catch(() => null); }
+          if (!dl) throw new Error('bouton de téléchargement non trouvé (' + nbB + ' candidats)');
+          const f = await dl.path(); const buf = fs.readFileSync(f);
+          if (buf.length > 25e6) throw new Error('fichier > 25 Mo');
+          const rep = await fetch(PJ_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'pj', key: PJ_KEY, doc: d.code, lot: d.lot, nom: p.n, data: buf.toString('base64'), desc: [p.m.visa, p.m.par, p.m.date].filter(Boolean).join(' · ') }) });
+          const j = await rep.json(); if (!j.ok || !j.url) throw new Error(j.msg || 'dépôt refusé');
+          p.u = j.url; idx[d.code + '|' + p.n] = j.url; dep++;
+          if (dep <= 3) note('PJ déposée : ' + d.code + ' · ' + p.n + ' → Drive');
+        } catch (e) { ko++; if (ko <= 6) note('PJ échec ' + d.code + ' · ' + p.n + ' : ' + e.message.slice(0, 140)); await page.screenshot({ path: path.join(CAP, 'pj-echec-' + ko + '.png') }).catch(() => {}); }
+      }
     } catch (e) {}
   }
-  note('PJ : ' + cibles.length + ' document(s) commenté(s) interrogé(s) · ' + nb + ' pièce(s) jointe(s) trouvée(s)');
-  if (exemple) note('PJ exemple ' + exemple.code + ' : ' + exemple.reponse.slice(0, 600).replace(/\s+/g, ' '));
-  /* 3) téléchargement des nouvelles PJ → Drive */
-  if (!PJ_URL) { note('PJ : dépôt Drive désactivé (secret KAIRNIAL_PJ_URL absent)'); return; }
-  let dep = 0, ko = 0;
-  for (const d of out.filter(x => (x.pjDoc || []).some(p => !p.u))) {
-    if (dep >= 20) break;
-    if (!(await ouvrirDoc(page, d.code).catch(() => false))) { ko++; continue; }
-    for (const p of d.pjDoc.filter(p => !p.u)) {
-      if (dep >= 20) break;
-      try {
-        const nom = page.locator('text=' + p.n).first();
-        if (!(await nom.count())) throw new Error('nom absent du panneau');
-        const boite = nom.locator('xpath=ancestor::*[.//button or .//a or .//*[@ng-click]][1]');
-        const btns = boite.locator('button, a, [ng-click], i, .fa');
-        const nbB = await btns.count(); let dl = null;
-        for (let k = nbB - 1; k >= 0 && !dl; k--) { dl = await Promise.all([page.waitForEvent('download', { timeout: 12000 }), btns.nth(k).click({ timeout: 5000 })]).then(x => x[0]).catch(() => null); }
-        if (!dl) throw new Error('bouton de téléchargement non trouvé');
-        const f = await dl.path(); const buf = fs.readFileSync(f);
-        if (buf.length > 25e6) throw new Error('fichier > 25 Mo');
-        const rep = await fetch(PJ_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'pj', key: PJ_KEY, doc: d.code, lot: d.lot, nom: p.n, data: buf.toString('base64') }) });
-        const j = await rep.json(); if (!j.ok || !j.url) throw new Error(j.msg || 'dépôt refusé');
-        p.u = j.url; idx[d.code + '|' + p.n] = j.url; dep++;
-      } catch (e) { ko++; if (ko <= 6) note('PJ échec ' + d.code + ' · ' + p.n + ' : ' + e.message.slice(0, 120)); }
-    }
-  }
+  page.off('response', ecouteDoc);
+  idx.__vus = dejaVus;
+  note('PJ : ' + ouverts + '/' + cibles.length + ' document(s) commenté(s) ouvert(s) · ' + nb + ' pièce(s) jointe(s) trouvée(s)' + (exemple ? ' · ex. ' + exemple.code + ' → ' + exemple.reponse.slice(0, 200) : ''));
+  if (!PJ_URL) note('PJ : dépôt Drive désactivé (secret KAIRNIAL_PJ_URL absent)');
   fs.writeFileSync(PJ_INDEX, JSON.stringify(idx));
   note('PJ : ' + dep + ' déposée(s) dans le Drive ce passage · ' + ko + ' échec(s) · ' + Object.keys(idx).length + ' au total');
 }
