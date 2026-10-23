@@ -112,8 +112,10 @@ async function recupererPJ(page, out) {
   let exemple = null, nb = 0;
   for (const d of cibles) {
     try {
-      const r = await req.post(modele.url, { headers: H, data: modele.post.split(String(dP.item_id)).join(String(d.item_id)), timeout: 30000 });
-      const t = await r.text();
+      /* Appel rejoué DANS la page Kairnial (même session, mêmes cookies, même jeton) */
+      const corps = modele.post.split(String(dP.item_id)).join(String(d.item_id));
+      const t = await page.evaluate(async ([u, h, b]) => { try { const r = await fetch(u, { method: 'POST', headers: h, body: b, credentials: 'include' }); return await r.text(); } catch (e) { return 'ERR ' + e.message; } }, [modele.url, H, corps]);
+      if (nb === 0 && d.code === PJ_PRIO) note('PJ : réponse rejouée pour ' + d.code + ' (' + t.length + ' car.) : ' + t.slice(0, 300).replace(/\s+/g, ' '));
       /* Réponse getFilesComments : { "<fileId>": [ { visaTitle, commentByFirstname/Lastname, commentDate, files:[{ entete_nom, item_id, path, size }] } ] } */
       let n = [], meta = {};
       try { const o = JSON.parse(t); Object.values(o).forEach(arr => (Array.isArray(arr) ? arr : []).forEach(c => (c.files || []).forEach(f => { if (f.entete_nom && !n.includes(f.entete_nom)) { n.push(f.entete_nom); meta[f.entete_nom] = { item: f.item_id, path: f.path, size: +f.size || 0, visa: c.visaTitle || '', par: ((c.commentByFirstname || '') + ' ' + (c.commentByLastname || '')).trim(), date: c.commentDate ? new Date(c.commentDate * 1000).toISOString() : '' }; } }))); } catch (e) { n = nomsPJ(t); }
